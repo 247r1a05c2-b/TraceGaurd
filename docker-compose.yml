@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: tracegaurd
+      POSTGRES_PASSWORD: tracegaurd
+      POSTGRES_DB: tracegaurd
+    ports:
+      - "5432:5432"
+    volumes:
+      - tracegaurd_pgdata:/var/lib/postgresql/data
+
+volumes:
+  tracegaurd_pgdata:
