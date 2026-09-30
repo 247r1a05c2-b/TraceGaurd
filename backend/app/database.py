@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine
+from sqlalchemy import DateTime, Integer, String, Text, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -14,6 +14,13 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 class Base(DeclarativeBase):
     pass
+
+
+class UserRecord(Base):
+    __tablename__ = "users"
+    email: Mapped[str] = mapped_column(String(250), primary_key=True)
+    role: Mapped[str] = mapped_column(String(50), default="SOFTWARE_ENGINEER")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class ClientRecord(Base):
@@ -109,6 +116,12 @@ class AuditRecord(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+
+
+def database_status() -> dict:
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+    return {"status": "CONNECTED", "engine": "SQLite", "path": str(DB_PATH), "tables": tables, "table_count": len(tables)}
 
 
 init_db()
