@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from .agents import run_agents
 from .guardrails import classify_action
@@ -8,6 +9,7 @@ from .simulator import available_scenarios, generate_scenario
 from .store import store
 
 app = FastAPI(title="TraceGaurd API", version="1.0.0", description="AI incident commander prototype")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/health")
 def health():
