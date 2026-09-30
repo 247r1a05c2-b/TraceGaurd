@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DEMO_ENGINEER_EMAIL: engineer@tracegaurd.ai
+  DEMO_ENGINEER_PASSWORD: ci-test-password
+  TRACEGAURD_SECRET: ci-session-secret-for-tests-only
+  TRACEGAURD_CLIENT_INGEST_SECRET: ci-client-secret-for-tests-only
+
 jobs:
   backend:
     runs-on: ubuntu-latest
@@ -15,7 +21,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r backend/requirements.txt
-      - run: pytest backend/tests
+      - run: pytest backend/tests -q
 
   frontend:
     runs-on: ubuntu-latest
