@@ -11,20 +11,177 @@
 
 :root[data-theme='light'] {
   color-scheme: light;
-  --tg-bg: #f5f7fa;
+  --tg-bg: #f4f7fb;
   --tg-surface: #ffffff;
-  --tg-surface-2: #eef2f6;
-  --tg-border: rgba(15,23,42,.12);
+  --tg-surface-2: #eef3f7;
+  --tg-border: rgba(15,23,42,.11);
   --tg-text: #101828;
   --tg-muted: #667085;
-  --tg-accent: #0f9f7a;
+  --tg-accent: #087f83;
 }
 
 html, body, #root {
   min-height: 100%;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--tg-bg);
   color: var(--tg-text);
+  transition: background .25s ease, color .25s ease;
+}
+
+button, input, select, textarea {
+  transition: border-color .18s ease, background .18s ease, color .18s ease, box-shadow .18s ease, transform .18s ease;
+}
+
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--tg-accent);
+  outline-offset: 2px;
+}
+
+html[data-theme='dark'] .card,
+html[data-theme='dark'] .client-card,
+html[data-theme='dark'] .evidence-card,
+html[data-theme='dark'] .agent-card,
+html[data-theme='dark'] .big-metric,
+html[data-theme='dark'] .metric {
+  box-shadow: 0 14px 36px rgba(0,0,0,.14);
+}
+
+html[data-theme='dark'] .primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 28px rgba(88,230,223,.16);
+}
+
+html[data-theme='dark'] .ghost:hover {
+  background: rgba(88,230,223,.07);
+  border-color: #58e6df;
+}
+
+html[data-theme='light'] body {
+  background: radial-gradient(circle at 85% -10%, #dff4f1 0, transparent 30%), var(--tg-bg);
+}
+
+html[data-theme='light'] .shell {
+  background: transparent;
+}
+
+html[data-theme='light'] aside {
+  background: rgba(255,255,255,.88);
+  border-color: #dbe4ea;
+  box-shadow: 10px 0 34px rgba(16,24,40,.045);
+}
+
+html[data-theme='light'] .nav:hover,
+html[data-theme='light'] .nav.active {
+  background: linear-gradient(90deg, #e7f5f4, #f4faf9);
+  color: #12363a;
+}
+
+html[data-theme='light'] .nav.active {
+  box-shadow: inset 3px 0 #087f83;
+}
+
+html[data-theme='light'] .status {
+  background: #effaf5;
+  border-color: #c9e8d8;
+  color: #247353;
+}
+
+html[data-theme='light'] .top {
+  background: rgba(255,255,255,.58);
+  backdrop-filter: blur(14px);
+}
+
+html[data-theme='light'] .hero-card {
+  background: linear-gradient(135deg, #ffffff 0%, #eef9f8 100%);
+  border-color: #cfe3e5;
+  box-shadow: 0 20px 55px rgba(16,48,60,.08);
+}
+
+html[data-theme='light'] .metric,
+html[data-theme='light'] .card,
+html[data-theme='light'] .client-card,
+html[data-theme='light'] .evidence-card,
+html[data-theme='light'] .agent-card,
+html[data-theme='light'] .big-metric {
+  background: rgba(255,255,255,.92);
+  border-color: #d9e3e8;
+  box-shadow: 0 12px 34px rgba(16,24,40,.055);
+}
+
+html[data-theme='light'] .metric:hover,
+html[data-theme='light'] .client-card:hover,
+html[data-theme='light'] .agent-card:hover {
+  border-color: #b7d7d9;
+  transform: translateY(-1px);
+  box-shadow: 0 16px 38px rgba(16,24,40,.075);
+}
+
+html[data-theme='light'] .primary {
+  background: #087f83;
+  border-color: #087f83;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(8,127,131,.15);
+}
+
+html[data-theme='light'] .ghost {
+  background: #fff;
+  color: #17676a;
+  border-color: #b9d4d7;
+}
+
+html[data-theme='light'] .ghost:hover {
+  background: #eff9f8;
+  border-color: #087f83;
+}
+
+html[data-theme='light'] .cause-card,
+html[data-theme='light'] .approval-banner {
+  background: linear-gradient(135deg, #f0fbfa, #ffffff);
+  border-color: #c4dedf;
+}
+
+html[data-theme='light'] .login {
+  background: #f4f7fb;
+}
+
+html[data-theme='light'] .login-form {
+  background: rgba(255,255,255,.96);
+  box-shadow: -20px 0 50px rgba(16,24,40,.05);
+}
+
+html[data-theme='light'] .login-form input {
+  background: #fff;
+  border-color: #cfdbe2;
+  color: #15212a;
+}
+
+html[data-theme='light'] .login-form input:focus {
+  border-color: #087f83;
+  box-shadow: 0 0 0 4px rgba(8,127,131,.09);
+}
+
+html[data-theme='light'] .theme-toggle {
+  background: rgba(255,255,255,.94);
+  color: #253944;
+  border-color: #cbd9df;
+  box-shadow: 0 12px 30px rgba(25,52,68,.14);
+}
+
+html[data-theme='dark'] .login-form input:focus {
+  border-color: #58e6df;
+  box-shadow: 0 0 0 4px rgba(88,230,223,.08);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
 }
