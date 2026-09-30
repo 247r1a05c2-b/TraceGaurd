@@ -29,8 +29,11 @@ class EventStore:
                     continue
 
     def add_many(self, events: list[IncidentEvent]) -> None:
+        if not events:
+            return
         with self._lock:
             with SessionLocal() as session:
+                pending_incidents: set[str] = set()
                 for event in events:
                     self._events[event.incident_id].append(event)
                     session.add(IncidentEventRecord(
@@ -41,13 +44,14 @@ class EventStore:
                         severity=event.severity.value,
                         message=event.message,
                     ))
-                    if session.get(IncidentRecord, event.incident_id) is None:
+                    if event.incident_id not in pending_incidents and session.get(IncidentRecord, event.incident_id) is None:
                         session.add(IncidentRecord(
                             id=event.incident_id,
                             title=f"Incident {event.incident_id}",
                             severity=event.severity.value,
                             status="OPEN",
                         ))
+                        pending_incidents.add(event.incident_id)
                 session.commit()
 
     def get(self, incident_id: str) -> list[IncidentEvent]:
