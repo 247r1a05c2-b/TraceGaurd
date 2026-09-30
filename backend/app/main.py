@@ -1,5 +1,6 @@
 from collections import Counter
 from datetime import datetime, timezone
+import json
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -10,6 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from .agents import run_agents
+from .database import ClientRecord, UserRecord, database_status, SessionLocal
 from .guardrails import classify_action
 from .models import IncidentSummary, IngestRequest, IngestResponse
 from .monitoring import audit_log, clients, execute_approved_action, execution_log, heartbeat, record_audit, register_client
@@ -18,7 +20,7 @@ from .security import issue_token, verify_credentials, verify_token
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
-app = FastAPI(title="TraceGaurd API", version="3.1.0", description="Multi-agent AI incident commander with human approval and controlled remediation")
+app = FastAPI(title="TraceGaurd API", version="3.2.0", description="Multi-agent AI incident commander with persistent MVP data, human approval and controlled remediation")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 bearer = HTTPBearer(auto_error=False)
 
@@ -55,7 +57,12 @@ def current_engineer(credentials: HTTPAuthorizationCredentials | None = Depends(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "tracegaurd-api", "version": "3.1.0"}
+    return {"status": "ok", "service": "tracegaurd-api", "version": "3.2.0", "database": database_status()}
+
+
+@app.get("/api/v1/database/status")
+def db_status(engineer: str = Depends(current_engineer)):
+    return database_status()
 
 
 @app.post("/api/v1/auth/login")
@@ -63,6 +70,10 @@ def login(request: LoginRequest):
     if not verify_credentials(request.email, request.password):
         raise HTTPException(status_code=401, detail="Invalid engineer credentials")
     token = issue_token(request.email)
+    with SessionLocal() as session:
+        if session.get(UserRecord, request.email.lower()) is None:
+            session.add(UserRecord(email=request.email.lower(), role="SOFTWARE_ENGINEER"))
+            session.commit()
     record_audit("LOGIN", request.email, {})
     return {"access_token": token, "token_type": "bearer", "engineer": request.email.lower()}
 
@@ -85,6 +96,12 @@ def list_clients(engineer: str = Depends(current_engineer)):
 @app.post("/api/v1/clients")
 def add_client(request: ClientRequest, engineer: str = Depends(current_engineer)):
     client = register_client(request.name, request.environment, request.service)
+    with SessionLocal() as session:
+        session.merge(ClientRecord(
+            id=client["client_id"], name=client["name"], environment=client["environment"],
+            service=client["service"], incidents=client.get("incidents", 0), status=client.get("status", "ONLINE")
+        ))
+        session.commit()
     record_audit("CLIENT_REGISTERED", engineer, client)
     return client
 
@@ -110,6 +127,11 @@ def simulate(scenario: str, engineer: str = Depends(current_engineer)):
         service = client["service"].lower()
         if service in event_services or any(service.split("-")[0] in item for item in event_services):
             client["incidents"] += 1
+            with SessionLocal() as session:
+                record = session.get(ClientRecord, client["client_id"])
+                if record:
+                    record.incidents = client["incidents"]
+                    session.commit()
     record_audit("INCIDENT_INGESTED", engineer, {"scenario": scenario, "events": len(normalized)})
     return IngestResponse(accepted=len(normalized), incident_ids=sorted({e.incident_id for e in normalized}))
 
@@ -177,6 +199,10 @@ def approve_action(incident_id: str, request: ApprovalRequest, engineer: str = D
         raise HTTPException(status_code=403, detail="Guardrail blocked this action")
     approval_id = f"approval-{len(audit_log) + 1}"
     state = "APPROVED" if request.approved else "REJECTED"
+    with SessionLocal() as session:
+        from .database import ApprovalRecord
+        session.add(ApprovalRecord(id=approval_id, incident_id=incident_id, action=request.action, engineer=engineer, state=state))
+        session.commit()
     record_audit("HUMAN_APPROVAL", engineer, {"incident_id": incident_id, "action": request.action, "state": state, "approval_id": approval_id})
     return {"approval_id": approval_id, "incident_id": incident_id, "action": request.action, "state": state, "guardrail": classification}
 
@@ -188,7 +214,12 @@ def execute_action(incident_id: str, request: ExecuteRequest, engineer: str = De
     approved = any(x.get("event") == "HUMAN_APPROVAL" and x.get("details", {}).get("approval_id") == request.approval_id and x.get("details", {}).get("state") == "APPROVED" and x.get("details", {}).get("incident_id") == incident_id and x.get("details", {}).get("action") == request.action for x in audit_log)
     if not approved:
         raise HTTPException(status_code=403, detail="Explicit human approval is required before execution")
-    return execute_approved_action(incident_id, request.action, engineer)
+    result = execute_approved_action(incident_id, request.action, engineer)
+    with SessionLocal() as session:
+        from .database import RemediationExecutionRecord
+        session.add(RemediationExecutionRecord(incident_id=incident_id, action=request.action, engineer=engineer, status=result.get("status", "EXECUTED"), verification=json.dumps(result.get("verification", []))))
+        session.commit()
+    return result
 
 
 @app.get("/api/v1/incidents/{incident_id}/remediation")
@@ -210,7 +241,7 @@ def metrics(engineer: str = Depends(current_engineer)):
     action_count = len(execution_log)
     approvals = sum(1 for x in audit_log if x.get("event") == "HUMAN_APPROVAL" and x.get("details", {}).get("state") == "APPROVED")
     blocked = sum(1 for x in audit_log if x.get("event") == "HUMAN_APPROVAL" and x.get("details", {}).get("state") == "REJECTED")
-    return {"active_incidents": incident_count, "clients_monitored": len(clients), "actions_executed": action_count, "human_approvals": approvals, "human_rejections": blocked, "audit_events": len(audit_log), "uptime_status": "OPERATIONAL", "timestamp": datetime.now(timezone.utc).isoformat(), "severity_distribution": dict(Counter(e.severity.value for i in store.incidents() for e in store.get(i)))}
+    return {"active_incidents": incident_count, "clients_monitored": len(clients), "actions_executed": action_count, "human_approvals": approvals, "human_rejections": blocked, "audit_events": len(audit_log), "uptime_status": "OPERATIONAL", "database": database_status(), "timestamp": datetime.now(timezone.utc).isoformat(), "severity_distribution": dict(Counter(e.severity.value for i in store.incidents() for e in store.get(i)))}
 
 
 @app.get("/api/v1/audit")
