@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TraceGaurd Demo Center</title>
+<style>
+:root{font-family:Inter,system-ui,sans-serif;color:#eaf0f6;background:#07111f}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 15% 10%,#15304d 0,#07111f 42%,#050b14 100%)}.wrap{max-width:1180px;margin:auto;padding:42px 24px}.brand{font-weight:900;letter-spacing:.12em;font-size:20px}.brand span{opacity:.55}.hero{display:flex;justify-content:space-between;gap:24px;align-items:end;margin:42px 0 28px}.hero h1{font-size:48px;line-height:1.02;margin:8px 0}.hero p{color:#9eafc1;max-width:680px}.pill{display:inline-block;border:1px solid #31506e;border-radius:999px;padding:7px 12px;font-size:11px;letter-spacing:.12em;color:#83c7ff}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{background:rgba(14,28,45,.88);border:1px solid #203a54;border-radius:18px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,.25)}.card h2{margin:0 0 8px}.card p{color:#9eafc1;min-height:50px}.button{width:100%;border:0;border-radius:10px;padding:13px 16px;background:#eaf4ff;color:#07111f;font-weight:800;cursor:pointer}.button.alt{background:#18344d;color:#d8ebff;border:1px solid #2c506e}.button:disabled{opacity:.5;cursor:not-allowed}.login{max-width:430px;margin:70px auto}.field{display:grid;gap:7px;margin:12px 0}.field input{padding:12px;border-radius:9px;border:1px solid #31506e;background:#07111f;color:white}.status{margin-top:24px;padding:18px;border-radius:14px;background:#081a2b;border:1px solid #23445f;white-space:pre-wrap}.flow{display:flex;flex-wrap:wrap;gap:8px;margin-top:18px}.step{padding:8px 10px;border-radius:8px;background:#102b43;color:#a9d6f8;font-size:12px}.ok{color:#75e0a5}.bad{color:#ff8e9e}.muted{color:#8196aa}.topbar{display:flex;justify-content:space-between;align-items:center}.logout{background:none;border:1px solid #31506e;color:#c8d8e7;padding:8px 12px;border-radius:8px;cursor:pointer}@media(max-width:800px){.grid{grid-template-columns:1fr}.hero{display:block}.hero h1{font-size:38px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<div class="topbar"><div class="brand">TRACE<span>GAURD</span> / DEMO CENTER</div><button class="logout" onclick="logout()">Sign out</button></div>
+<div id="login" class="login card"><span class="pill">HACKATHON DEMONSTRATION</span><h2>Incident Command Demo</h2><p class="muted">Use the configured TraceGaurd engineer account to run controlled health and incident scenarios.</p><div class="field"><label>Email</label><input id="email" value="engineer@tracegaurd.ai"></div><div class="field"><label>Password</label><input id="password" type="password" value="TraceGaurd@123"></div><button class="button" onclick="login()">Enter Demo Center</button><div id="loginStatus" class="status"></div></div>
+<div id="app" hidden>
+<div class="hero"><div><span class="pill">CONTROLLED FAILURE LAB</span><h1>Show TraceGaurd<br>finding the cause.</h1><p>Run a healthy website check, create a real HTTP outage incident, or launch the multi-agent checkout RCA scenario. Results are sent through the deployed backend.</p></div></div>
+<div class="grid">
+<div class="card"><h2>Healthy Website</h2><p>Register and check httpbin HTTP 200. Demonstrates normal monitoring.</p><button class="button" onclick="website('healthy')">Run Healthy Check</button></div>
+<div class="card"><h2>HTTP 500 Failure</h2><p>Register and check a controlled HTTP 500 endpoint. TraceGaurd should create an incident.</p><button class="button" onclick="website('500')">Trigger 500 Incident</button></div>
+<div class="card"><h2>HTTP 503 Outage</h2><p>Register and check a controlled HTTP 503 endpoint. Demonstrates outage detection.</p><button class="button" onclick="website('503')">Trigger 503 Outage</button></div>
+<div class="card"><h2>Full RCA Scenario</h2><p>Creates deployment, HTTP 500, database timeout and support-ticket evidence for the LangGraph pipeline.</p><button class="button" onclick="scenario()">Run Multi-Agent RCA</button></div>
+<div class="card"><h2>Live Client</h2><p>Register your own website and immediately run a health check using the same monitoring API.</p><button class="button alt" onclick="customClient()">Add Client URL</button></div>
+<div class="card"><h2>Open Dashboard</h2><p>Return to the main TraceGaurd command center to inspect incidents, agents, evidence and metrics.</p><button class="button alt" onclick="location.href='/'">Open Dashboard</button></div>
+</div>
+<div id="result" class="status"><span class="muted">No demo executed yet.</span></div>
+<div class="flow"><span class="step">MONITOR</span><span class="step">INGEST</span><span class="step">CORRELATE</span><span class="step">RAG</span><span class="step">ROOT CAUSE</span><span class="step">DIAGNOSIS</span><span class="step">GUARDRAIL</span><span class="step">HUMAN APPROVAL</span><span class="step">REMEDIATION</span></div>
+</div></div>
+<script>
+const API='';let token=localStorage.getItem('tg_demo_token');
+async function api(path,opt={}){const r=await fetch(API+path,{...opt,headers:{'Content-Type':'application/json',Authorization:token?'Bearer '+token:undefined,...(opt.headers||{})}});let d={};try{d=await r.json()}catch{}if(!r.ok)throw Error(d.detail||'Request failed');return d}
+function show(msg,good=true){const el=document.getElementById('result');el.innerHTML='<span class="'+(good?'ok':'bad')+'">'+msg.replace(/</g,'&lt;')+'</span>'}
+async function login(){try{const email=document.getElementById('email').value,password=document.getElementById('password').value;const r=await api('/api/v1/auth/login',{method:'POST',body:JSON.stringify({email,password})});token=r.access_token;localStorage.setItem('tg_demo_token',token);document.getElementById('login').hidden=true;document.getElementById('app').hidden=false;show('Authenticated as '+r.engineer+'\nDemo Center is connected to the deployed TraceGaurd API.')}catch(e){document.getElementById('loginStatus').textContent=e.message}}
+async function website(kind){try{const map={healthy:['TraceGaurd Demo Healthy','https://httpbin.org/status/200'],500:['TraceGaurd Demo HTTP500','https://httpbin.org/status/500'],503:['TraceGaurd Demo HTTP503','https://httpbin.org/status/503']};const [name,url]=map[kind];let clients=await api('/api/v1/clients');let c=clients.find(x=>x.name===name);if(!c)c=await api('/api/v1/clients',{method:'POST',body:JSON.stringify({name,environment:'demo',service:'demo-web',website_url:url,health_path:'/'} )});const r=await api('/api/v1/clients/'+c.client_id+'/check',{method:'POST'});show((r.healthy?'HEALTHY':'INCIDENT DETECTED')+'\nURL: '+r.url+'\nHTTP: '+(r.http_status||'NO RESPONSE')+'\nResponse: '+r.response_ms+' ms'+(r.incident_id?'\nIncident: '+r.incident_id:'') );}catch(e){show(e.message,false)}}
+async function scenario(){try{const r=await api('/api/v1/simulate/checkout',{method:'POST'});show('MULTI-AGENT INCIDENT CREATED\nIncident IDs: '+r.incident_ids.join(', ')+'\nOpen the dashboard → Incidents → Investigation to run RCA, RAG, diagnosis, guardrails and metrics.')}catch(e){show(e.message,false)}}
+async function customClient(){const url=prompt('Client website URL (for example https://example.com)');if(!url)return;const name=prompt('Client name','Hackathon Client');if(!name)return;try{const c=await api('/api/v1/clients',{method:'POST',body:JSON.stringify({name,environment:'production',service:'web',website_url:url,health_path:'/'})});const r=await api('/api/v1/clients/'+c.client_id+'/check',{method:'POST'});show('CLIENT REGISTERED\n'+c.name+'\n'+r.url+'\nHTTP '+(r.http_status||'NO RESPONSE')+(r.incident_id?'\nIncident: '+r.incident_id:''))}catch(e){show(e.message,false)}}
+function logout(){localStorage.removeItem('tg_demo_token');location.reload()}
+if(token){document.getElementById('login').hidden=true;document.getElementById('app').hidden=false}
+</script>
+</body></html>
