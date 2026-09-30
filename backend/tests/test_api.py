@@ -1,3 +1,5 @@
+import os
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -6,7 +8,7 @@ client = TestClient(app)
 
 
 def login():
-    response = client.post("/api/v1/auth/login", json={"email": "engineer@tracegaurd.ai", "password": "TraceGaurd@123"})
+    response = client.post("/api/v1/auth/login", json={"email": os.getenv("DEMO_ENGINEER_EMAIL", "engineer@tracegaurd.ai"), "password": os.getenv("DEMO_ENGINEER_PASSWORD", "ci-test-password")})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
