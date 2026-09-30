@@ -12,6 +12,9 @@ env:
   TRACEGAURD_SECRET: ci-session-secret-for-tests-only
   TRACEGAURD_CLIENT_INGEST_SECRET: ci-client-secret-for-tests-only
 
+permissions:
+  contents: write
+
 jobs:
   backend:
     runs-on: ubuntu-latest
