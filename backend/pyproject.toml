@@ -1,3 +1,19 @@
+[project]
+name = "tracegaurd-backend"
+version = "0.1.0"
+description = "TraceGaurd multi-agent AI incident commander backend"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "fastapi==0.115.12",
+  "uvicorn==0.34.0",
+  "pydantic==2.11.3",
+  "sqlalchemy==2.0.40",
+  "psycopg[binary]>=3.2.10",
+  "langgraph>=0.2.0,<2.0.0",
+  "python-dotenv>=1.0.1,<2.0.0",
+  "google-genai>=1.0.0,<2.0.0"
+]
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
