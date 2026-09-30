@@ -1,11 +1,12 @@
 from collections import Counter
 from datetime import datetime, timezone
 import json
+import os
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
@@ -13,16 +14,25 @@ from pydantic import BaseModel, Field
 from .agents import run_agents
 from .database import ClientRecord, UserRecord, database_status, SessionLocal
 from .guardrails import classify_action
-from .models import IncidentSummary, IngestRequest, IngestResponse
-from .monitoring import audit_log, clients, execute_approved_action, execution_log, heartbeat, record_audit, register_client
+from .models import IncidentEvent, IncidentSummary, IngestRequest, IngestResponse, Severity
+from .monitoring import audit_log, clients, execute_approved_action, execution_log, heartbeat, check_website, hydrate_clients, record_audit, register_client
 from .normalizer import normalize_events
 from .security import issue_token, verify_credentials, verify_token
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
-app = FastAPI(title="TraceGaurd API", version="3.3.0", description="Multi-agent AI incident commander with persistent MVP data, signed client ingestion, human approval and controlled remediation")
+app = FastAPI(title="TraceGaurd API", version="4.0.0", description="Multi-client incident monitoring, multi-agent RCA, RAG evidence, human guardrails and controlled remediation")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 bearer = HTTPBearer(auto_error=False)
+
+with SessionLocal() as _session:
+    _records = _session.query(ClientRecord).all()
+    hydrate_clients([{
+        "id": x.id, "name": x.name, "environment": x.environment, "service": x.service,
+        "website_url": x.website_url, "health_path": x.health_path, "incidents": x.incidents,
+        "status": x.status, "last_seen": x.last_seen.isoformat() if x.last_seen else None,
+        "last_response_ms": x.last_response_ms, "last_http_status": x.last_http_status,
+    } for x in _records])
 
 
 class LoginRequest(BaseModel):
@@ -31,9 +41,11 @@ class LoginRequest(BaseModel):
 
 
 class ClientRequest(BaseModel):
-    name: str = Field(min_length=2)
-    environment: str = Field(default="production")
-    service: str = Field(min_length=2)
+    name: str = Field(min_length=2, max_length=200)
+    environment: str = Field(default="production", max_length=50)
+    service: str = Field(min_length=2, max_length=120)
+    website_url: str | None = Field(default=None, max_length=1000)
+    health_path: str = Field(default="/", max_length=250)
 
 
 class ApprovalRequest(BaseModel):
@@ -55,9 +67,21 @@ def current_engineer(credentials: HTTPAuthorizationCredentials | None = Depends(
     return email
 
 
+def persist_client(client: dict) -> None:
+    with SessionLocal() as session:
+        session.merge(ClientRecord(
+            id=client["client_id"], name=client["name"], environment=client["environment"],
+            service=client["service"], website_url=client.get("website_url"), health_path=client.get("health_path", "/"),
+            incidents=client.get("incidents", 0), status=client.get("status", "ONLINE"),
+            last_seen=datetime.fromisoformat(client["last_seen"]) if client.get("last_seen") else None,
+            last_response_ms=client.get("last_response_ms"), last_http_status=client.get("last_http_status")
+        ))
+        session.commit()
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "tracegaurd-api", "version": "3.3.0", "database": database_status()}
+    return {"status": "ok", "service": "tracegaurd-api", "version": "4.0.0", "database": database_status(), "clients": len(clients)}
 
 
 @app.get("/api/v1/database/status")
@@ -95,13 +119,11 @@ def list_clients(engineer: str = Depends(current_engineer)):
 
 @app.post("/api/v1/clients")
 def add_client(request: ClientRequest, engineer: str = Depends(current_engineer)):
-    client = register_client(request.name, request.environment, request.service)
-    with SessionLocal() as session:
-        session.merge(ClientRecord(
-            id=client["client_id"], name=client["name"], environment=client["environment"],
-            service=client["service"], incidents=client.get("incidents", 0), status=client.get("status", "ONLINE")
-        ))
-        session.commit()
+    try:
+        client = register_client(request.name, request.environment, request.service, request.website_url, request.health_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    persist_client(client)
     record_audit("CLIENT_REGISTERED", engineer, client)
     return client
 
@@ -109,9 +131,42 @@ def add_client(request: ClientRequest, engineer: str = Depends(current_engineer)
 @app.post("/api/v1/clients/{client_id}/heartbeat")
 def client_heartbeat(client_id: str, engineer: str = Depends(current_engineer)):
     try:
-        return heartbeat(client_id)
+        result = heartbeat(client_id)
+        persist_client(result)
+        record_audit("CLIENT_HEARTBEAT", engineer, {"client_id": client_id})
+        return result
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Client not found") from exc
+
+
+@app.post("/api/v1/clients/{client_id}/check")
+def client_check(client_id: str, engineer: str = Depends(current_engineer)):
+    try:
+        result = check_website(client_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Client not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    client = clients[client_id]
+    persist_client(client)
+    record_audit("WEBSITE_HEALTH_CHECK", engineer, result)
+    if not result["healthy"]:
+        incident_id = f"WEB-{uuid4().hex[:10]}"
+        status_text = result.get("http_status") or "NO_RESPONSE"
+        event = IncidentEvent(
+            incident_id=incident_id,
+            source="alert",
+            service=client["service"],
+            severity=Severity.critical if result.get("status") == "DOWN" else Severity.warning,
+            message=f"Website health check failed for {result['url']}: status={status_text}; response_ms={result['response_ms']}; error={result.get('error', 'unhealthy response')}",
+            metadata={"client_id": client_id, "website_url": result["url"], "http_status": result.get("http_status"), "response_ms": result["response_ms"]},
+        )
+        store.add_many([event])
+        client["incidents"] += 1
+        persist_client(client)
+        record_audit("CLIENT_INCIDENT_CREATED", client_id, {"incident_id": incident_id, "reason": event.message})
+        result["incident_id"] = incident_id
+    return result
 
 
 @app.post("/api/v1/simulate/{scenario}", response_model=IngestResponse)
@@ -127,11 +182,7 @@ def simulate(scenario: str, engineer: str = Depends(current_engineer)):
         service = client["service"].lower()
         if service in event_services or any(service.split("-")[0] in item for item in event_services):
             client["incidents"] += 1
-            with SessionLocal() as session:
-                record = session.get(ClientRecord, client["client_id"])
-                if record:
-                    record.incidents = client["incidents"]
-                    session.commit()
+            persist_client(client)
     record_audit("INCIDENT_INGESTED", engineer, {"scenario": scenario, "events": len(normalized)})
     return IngestResponse(accepted=len(normalized), incident_ids=sorted({e.incident_id for e in normalized}))
 
@@ -170,10 +221,7 @@ def incident_analysis(incident_id: str, engineer: str = Depends(current_engineer
         raise HTTPException(status_code=404, detail="Incident not found")
     result = run_agents([event.model_dump(mode="json") for event in events])
     result["diagnosis_steps"] = result.get("diagnosis_steps") or result.get("steps", [])
-    result["repair_steps"] = result.get("repair_steps") or [
-        {"stage": "Prepare safe remediation", "finding": action.get("action", ""), "validation": action.get("reason", "")}
-        for action in result.get("actions", [])
-    ]
+    result["repair_steps"] = result.get("repair_steps") or [{"stage": "Prepare safe remediation", "finding": action.get("action", ""), "validation": action.get("reason", "")} for action in result.get("actions", [])]
     result["evaluation"] = evaluate_analysis(result)
     result["approval_state"] = "PENDING_HUMAN_REVIEW" if any(a.get("risk") == "APPROVAL" for a in result.get("actions", [])) else "SAFE"
     return result
@@ -249,7 +297,6 @@ def audit(engineer: str = Depends(current_engineer)):
     return list(reversed(audit_log[-100:]))
 
 
-from fastapi import Request
 from .client_gateway import authenticate_client
 
 
@@ -265,11 +312,12 @@ def client_ingest(request: IngestRequest, http_request: Request):
     client["last_seen"] = datetime.now(timezone.utc).isoformat()
     client["status"] = "MONITORING"
     client["incidents"] += len({event.incident_id for event in normalized})
-    with SessionLocal() as session:
-        record = session.get(ClientRecord, client_id)
-        if record:
-            record.incidents = client["incidents"]
-            record.status = "MONITORING"
-            session.commit()
+    persist_client(client)
     record_audit("CLIENT_EVENTS_INGESTED", client_id, {"events": len(normalized), "incidents": sorted({event.incident_id for event in normalized})})
     return IngestResponse(accepted=len(normalized), incident_ids=sorted({event.incident_id for event in normalized}))
+
+
+try:
+    from uuid import uuid4
+except ImportError:
+    uuid4 = None
