@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 
 from .agents import run_agents
+from .guardrails import classify_action
 from .models import IncidentSummary, IngestRequest, IngestResponse
 from .normalizer import normalize_events
 from .simulator import available_scenarios, generate_scenario
@@ -55,3 +56,7 @@ def incident_analysis(incident_id: str):
     if not events:
         raise HTTPException(status_code=404, detail="Incident not found")
     return run_agents([event.model_dump(mode="json") for event in events])
+
+@app.post("/api/v1/guardrails/check")
+def guardrail_check(payload: dict):
+    return classify_action(payload.get("action", ""))
