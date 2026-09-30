@@ -11,7 +11,7 @@ client = TestClient(app)
 
 
 def login():
-    response = client.post("/api/v1/auth/login", json={"email": "engineer@tracegaurd.ai", "password": "TraceGaurd@123"})
+    response = client.post("/api/v1/auth/login", json={"email": os.getenv("DEMO_ENGINEER_EMAIL", "engineer@tracegaurd.ai"), "password": os.getenv("DEMO_ENGINEER_PASSWORD", "ci-test-password")})
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
@@ -32,7 +32,7 @@ def test_signed_client_ingestion(monkeypatch):
 
 
 def test_client_ingestion_rejects_invalid_signature(monkeypatch):
-    headers = login()
+    login()
     client_id = next(iter(clients))
     monkeypatch.setenv("TRACEGAURD_CLIENT_INGEST_SECRET", "test-client-secret")
     payload = {"events": [{"incident_id": "gateway-test-2", "timestamp": "2026-09-30T18:00:00Z", "source": "alert", "service": "checkout-api", "severity": "warning", "message": "Timeout detected"}]}
