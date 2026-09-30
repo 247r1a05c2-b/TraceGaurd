@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import os
 
-from sqlalchemy import DateTime, Integer, String, Text, create_engine, inspect
+from sqlalchemy import DateTime, Integer, String, Text, create_engine, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -20,12 +20,14 @@ else:
     DATABASE_URL = f"sqlite:///{DEFAULT_DB_PATH}"
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
-engine_kwargs = {"pool_pre_ping": True}
+engine_kwargs = {"pool_pre_ping": True, "pool_recycle": 1800}
 if IS_SQLITE:
     engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    engine_kwargs.update({"pool_size": int(os.getenv("DB_POOL_SIZE", "5")), "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "10"))})
 
 engine = create_engine(DATABASE_URL, **engine_kwargs)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
@@ -36,6 +38,19 @@ class UserRecord(Base):
     __tablename__ = "users"
     email: Mapped[str] = mapped_column(String(250), primary_key=True)
     role: Mapped[str] = mapped_column(String(50), default="SOFTWARE_ENGINEER")
+    password_hash: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    is_active: Mapped[bool] = mapped_column(default=True)
+    last_login: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class SessionRecord(Base):
+    __tablename__ = "auth_sessions"
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    email: Mapped[str] = mapped_column(String(250), index=True)
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    revoked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -132,18 +147,27 @@ class AuditRecord(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
+    if IS_SQLITE:
+        with engine.begin() as connection:
+            columns = {column["name"] for column in inspect(connection).get_columns("users")}
+            if "password_hash" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(300)"))
+            if "is_active" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+            if "last_login" not in columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
 
 
 def database_status() -> dict:
     inspector = inspect(engine)
     tables = inspector.get_table_names()
-    return {
-        "status": "CONNECTED",
-        "engine": "SQLite" if IS_SQLITE else "PostgreSQL",
-        "persistent": not IS_SQLITE,
-        "tables": tables,
-        "table_count": len(tables),
-    }
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        connected = True
+    except Exception:
+        connected = False
+    return {"status": "CONNECTED" if connected else "DEGRADED", "engine": "SQLite" if IS_SQLITE else "PostgreSQL", "persistent": not IS_SQLITE, "tables": tables, "table_count": len(tables), "pool_pre_ping": True}
 
 
 init_db()
