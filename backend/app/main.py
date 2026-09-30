@@ -18,7 +18,7 @@ from .security import issue_token, verify_credentials, verify_token
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
-app = FastAPI(title="TraceGaurd API", version="3.0.0", description="Multi-agent AI incident commander with human approval and controlled remediation")
+app = FastAPI(title="TraceGaurd API", version="3.1.0", description="Multi-agent AI incident commander with human approval and controlled remediation")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 bearer = HTTPBearer(auto_error=False)
 
@@ -55,7 +55,7 @@ def current_engineer(credentials: HTTPAuthorizationCredentials | None = Depends(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "tracegaurd-api", "version": "3.0.0"}
+    return {"status": "ok", "service": "tracegaurd-api", "version": "3.1.0"}
 
 
 @app.post("/api/v1/auth/login")
@@ -147,6 +147,11 @@ def incident_analysis(incident_id: str, engineer: str = Depends(current_engineer
     if not events:
         raise HTTPException(status_code=404, detail="Incident not found")
     result = run_agents([event.model_dump(mode="json") for event in events])
+    result["diagnosis_steps"] = result.get("diagnosis_steps") or result.get("steps", [])
+    result["repair_steps"] = result.get("repair_steps") or [
+        {"stage": "Prepare safe remediation", "finding": action.get("action", ""), "validation": action.get("reason", "")}
+        for action in result.get("actions", [])
+    ]
     result["evaluation"] = evaluate_analysis(result)
     result["approval_state"] = "PENDING_HUMAN_REVIEW" if any(a.get("risk") == "APPROVAL" for a in result.get("actions", [])) else "SAFE"
     return result
@@ -184,6 +189,14 @@ def execute_action(incident_id: str, request: ExecuteRequest, engineer: str = De
     if not approved:
         raise HTTPException(status_code=403, detail="Explicit human approval is required before execution")
     return execute_approved_action(incident_id, request.action, engineer)
+
+
+@app.get("/api/v1/incidents/{incident_id}/remediation")
+def incident_remediation(incident_id: str, engineer: str = Depends(current_engineer)):
+    if not store.get(incident_id):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    executions = [x for x in execution_log if x.get("incident_id") == incident_id]
+    return {"incident_id": incident_id, "executions": executions, "latest": executions[-1] if executions else None}
 
 
 @app.post("/api/v1/guardrails/check")
