@@ -11,20 +11,23 @@ class EventStore:
         self._lock = Lock()
         self._load_from_db()
 
+    @staticmethod
+    def _row_to_event(row: IncidentEventRecord) -> IncidentEvent:
+        return IncidentEvent.model_validate({
+            "incident_id": row.incident_id,
+            "timestamp": row.timestamp,
+            "source": row.source,
+            "service": row.service,
+            "severity": row.severity,
+            "message": row.message,
+        })
+
     def _load_from_db(self) -> None:
         with SessionLocal() as session:
             rows = session.query(IncidentEventRecord).order_by(IncidentEventRecord.timestamp).all()
             for row in rows:
                 try:
-                    event = IncidentEvent.model_validate({
-                        "incident_id": row.incident_id,
-                        "timestamp": row.timestamp,
-                        "source": row.source,
-                        "service": row.service,
-                        "severity": row.severity,
-                        "message": row.message,
-                    })
-                    self._events[row.incident_id].append(event)
+                    self._events[row.incident_id].append(self._row_to_event(row))
                 except Exception:
                     continue
 
@@ -35,7 +38,9 @@ class EventStore:
             with SessionLocal() as session:
                 pending_incidents: set[str] = set()
                 for event in events:
-                    self._events[event.incident_id].append(event)
+                    existing = self._events[event.incident_id]
+                    if not any(str(item.id) == str(event.id) for item in existing):
+                        existing.append(event)
                     session.add(IncidentEventRecord(
                         incident_id=event.incident_id,
                         timestamp=str(event.timestamp),
@@ -55,10 +60,28 @@ class EventStore:
                 session.commit()
 
     def get(self, incident_id: str) -> list[IncidentEvent]:
-        return sorted(self._events.get(incident_id, []), key=lambda event: event.timestamp)
+        cached = self._events.get(incident_id, [])
+        if cached:
+            return sorted(cached, key=lambda event: event.timestamp)
+        with SessionLocal() as session:
+            rows = session.query(IncidentEventRecord).filter(IncidentEventRecord.incident_id == incident_id).order_by(IncidentEventRecord.timestamp).all()
+            events: list[IncidentEvent] = []
+            for row in rows:
+                try:
+                    events.append(self._row_to_event(row))
+                except Exception:
+                    continue
+            if events:
+                self._events[incident_id] = events
+            return events
 
     def incidents(self) -> list[str]:
-        return sorted(self._events.keys())
+        with SessionLocal() as session:
+            rows = session.query(IncidentRecord.id).order_by(IncidentRecord.created_at.desc()).all()
+            ids = [row[0] for row in rows]
+        for incident_id in ids:
+            self.get(incident_id)
+        return ids
 
 
 store = EventStore()
