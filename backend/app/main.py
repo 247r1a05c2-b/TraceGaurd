@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -8,12 +12,12 @@ from .normalizer import normalize_events
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
-app = FastAPI(title="TraceGaurd API", version="1.0.0", description="AI incident commander prototype")
+app = FastAPI(title="TraceGaurd API", version="2.0.0", description="LangGraph multi-agent AI incident commander")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "tracegaurd-api", "version": "1.0.0"}
+    return {"status": "ok", "service": "tracegaurd-api", "version": "2.0.0"}
 
 @app.get("/api/v1/scenarios")
 def scenarios():
