@@ -1,7 +1,6 @@
+import math
+import re
 from typing import Any
-
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 
 RUNBOOKS = [
     {"id": "RB-001", "type": "runbook", "title": "Checkout 5xx runbook", "content": "Check recent deployments, error-rate spikes, application logs, request traces, and dependency health before considering rollback.", "tags": ["checkout", "500", "deployment", "rollback"]},
@@ -20,10 +19,43 @@ HISTORICAL_INCIDENTS = [
 KNOWLEDGE_BASE = RUNBOOKS + HISTORICAL_INCIDENTS
 
 
+def _tokens(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _tfidf_scores(query: str, documents: list[str]) -> list[float]:
+    query_tokens = _tokens(query)
+    doc_tokens = [_tokens(doc) for doc in documents]
+    document_count = len(doc_tokens)
+    document_frequency: dict[str, int] = {}
+    for tokens in doc_tokens:
+        for token in set(tokens):
+            document_frequency[token] = document_frequency.get(token, 0) + 1
+
+    def vector(tokens: list[str]) -> dict[str, float]:
+        counts: dict[str, int] = {}
+        for token in tokens:
+            counts[token] = counts.get(token, 0) + 1
+        total = max(1, len(tokens))
+        result = {}
+        for token, count in counts.items():
+            idf = math.log((1 + document_count) / (1 + document_frequency.get(token, 0))) + 1
+            result[token] = (count / total) * idf
+        return result
+
+    query_vector = vector(query_tokens)
+    query_norm = math.sqrt(sum(value * value for value in query_vector.values())) or 1.0
+    scores = []
+    for tokens in doc_tokens:
+        doc_vector = vector(tokens)
+        dot = sum(query_vector.get(token, 0.0) * value for token, value in doc_vector.items())
+        doc_norm = math.sqrt(sum(value * value for value in doc_vector.values())) or 1.0
+        scores.append(dot / (query_norm * doc_norm))
+    return scores
+
+
 def retrieve(query: str, top_k: int = 4) -> list[dict[str, Any]]:
     documents = [f"{item['title']} {item['content']} {' '.join(item['tags'])}" for item in KNOWLEDGE_BASE]
-    vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
-    matrix = vectorizer.fit_transform(documents + [query])
-    scores = cosine_similarity(matrix[-1], matrix[:-1]).flatten()
+    scores = _tfidf_scores(query, documents)
     ranked = sorted(zip(scores, KNOWLEDGE_BASE), key=lambda pair: pair[0], reverse=True)
     return [{**item, "score": round(float(score), 4), "retrieval_mode": "tfidf_vector"} for score, item in ranked[:top_k]]
