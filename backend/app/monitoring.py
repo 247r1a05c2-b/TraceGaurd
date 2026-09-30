@@ -30,7 +30,13 @@ def execute_approved_action(incident_id: str, action: str, actor: str) -> dict[s
     allowed = {"Freeze further checkout deployments", "Inspect database pool saturation", "Compare current and previous checkout release", "Rollback checkout deployment", "Restart affected service"}
     if action not in allowed:
         raise ValueError("Action is not on the TraceGaurd execution allow-list")
-    result = {"execution_id": f"exec-{uuid4().hex[:8]}", "incident_id": incident_id, "action": action, "status": "SIMULATED_SUCCESS", "actor": actor, "timestamp": datetime.now(timezone.utc).isoformat(), "message": "TraceGaurd executed the approved demo remediation workflow. Connect a signed production adapter before real mutations."}
+    now = datetime.now(timezone.utc).isoformat()
+    verification = [
+        {"check": "Execution safety", "status": "PASS", "message": "Only an allow-listed remediation was executed after explicit human approval."},
+        {"check": "Service health", "status": "PENDING", "message": "Connect a signed infrastructure adapter to perform live health checks."},
+        {"check": "Error rate", "status": "PENDING", "message": "Connect the client's telemetry provider to compare pre/post remediation error rate."},
+    ]
+    result = {"execution_id": f"exec-{uuid4().hex[:8]}", "incident_id": incident_id, "action": action, "status": "SIMULATED_SUCCESS", "actor": actor, "timestamp": now, "message": "TraceGaurd executed the approved demo remediation workflow. Connect a signed production adapter before real mutations.", "verification": verification}
     execution_log.append(result)
     record_audit("ACTION_EXECUTED", actor, result)
     return result
