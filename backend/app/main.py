@@ -20,7 +20,7 @@ from .security import issue_token, verify_credentials, verify_token
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
-app = FastAPI(title="TraceGaurd API", version="3.2.0", description="Multi-agent AI incident commander with persistent MVP data, human approval and controlled remediation")
+app = FastAPI(title="TraceGaurd API", version="3.3.0", description="Multi-agent AI incident commander with persistent MVP data, signed client ingestion, human approval and controlled remediation")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 bearer = HTTPBearer(auto_error=False)
 
@@ -57,7 +57,7 @@ def current_engineer(credentials: HTTPAuthorizationCredentials | None = Depends(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "tracegaurd-api", "version": "3.2.0", "database": database_status()}
+    return {"status": "ok", "service": "tracegaurd-api", "version": "3.3.0", "database": database_status()}
 
 
 @app.get("/api/v1/database/status")
@@ -247,3 +247,29 @@ def metrics(engineer: str = Depends(current_engineer)):
 @app.get("/api/v1/audit")
 def audit(engineer: str = Depends(current_engineer)):
     return list(reversed(audit_log[-100:]))
+
+
+from fastapi import Request
+from .client_gateway import authenticate_client
+
+
+@app.post("/api/v1/client/events", response_model=IngestResponse)
+def client_ingest(request: IngestRequest, http_request: Request):
+    client_id = http_request.headers.get("X-TraceGaurd-Client-ID", "")
+    if not client_id or client_id not in clients:
+        raise HTTPException(status_code=401, detail="Valid X-TraceGaurd-Client-ID is required")
+    authenticate_client(http_request, client_id)
+    normalized = normalize_events(request.events)
+    store.add_many(normalized)
+    client = clients[client_id]
+    client["last_seen"] = datetime.now(timezone.utc).isoformat()
+    client["status"] = "MONITORING"
+    client["incidents"] += len({event.incident_id for event in normalized})
+    with SessionLocal() as session:
+        record = session.get(ClientRecord, client_id)
+        if record:
+            record.incidents = client["incidents"]
+            record.status = "MONITORING"
+            session.commit()
+    record_audit("CLIENT_EVENTS_INGESTED", client_id, {"events": len(normalized), "incidents": sorted({event.incident_id for event in normalized})})
+    return IngestResponse(accepted=len(normalized), incident_ids=sorted({event.incident_id for event in normalized}))
