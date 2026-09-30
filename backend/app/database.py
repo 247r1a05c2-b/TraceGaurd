@@ -60,8 +60,13 @@ class ClientRecord(Base):
     name: Mapped[str] = mapped_column(String(200))
     environment: Mapped[str] = mapped_column(String(50))
     service: Mapped[str] = mapped_column(String(120))
+    website_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    health_path: Mapped[str] = mapped_column(String(250), default="/")
     incidents: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(30), default="ONLINE")
+    last_seen: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_response_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_http_status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
@@ -147,15 +152,23 @@ class AuditRecord(Base):
 
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
-    if IS_SQLITE:
-        with engine.begin() as connection:
-            columns = {column["name"] for column in inspect(connection).get_columns("users")}
-            if "password_hash" not in columns:
-                connection.execute(text("ALTER TABLE users ADD COLUMN password_hash VARCHAR(300)"))
-            if "is_active" not in columns:
-                connection.execute(text("ALTER TABLE users ADD COLUMN is_active BOOLEAN DEFAULT 1"))
-            if "last_login" not in columns:
-                connection.execute(text("ALTER TABLE users ADD COLUMN last_login DATETIME"))
+    with engine.begin() as connection:
+        columns = {column["name"] for column in inspect(connection).get_columns("clients")}
+        additions = {
+            "website_url": "VARCHAR(1000)",
+            "health_path": "VARCHAR(250) DEFAULT '/'",
+            "last_seen": "TIMESTAMP",
+            "last_response_ms": "INTEGER",
+            "last_http_status": "INTEGER",
+        }
+        for name, definition in additions.items():
+            if name not in columns:
+                connection.execute(text(f"ALTER TABLE clients ADD COLUMN {name} {definition}"))
+        user_columns = {column["name"] for column in inspect(connection).get_columns("users")}
+        user_additions = {"password_hash": "VARCHAR(300)", "is_active": "BOOLEAN DEFAULT TRUE", "last_login": "TIMESTAMP"}
+        for name, definition in user_additions.items():
+            if name not in user_columns:
+                connection.execute(text(f"ALTER TABLE users ADD COLUMN {name} {definition}"))
 
 
 def database_status() -> dict:
