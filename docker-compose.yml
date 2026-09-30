@@ -1,4 +1,18 @@
 services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+psycopg://tracegaurd:tracegaurd@postgres:5432/tracegaurd
+    depends_on:
+      - postgres
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
   postgres:
     image: postgres:17
     environment:
@@ -9,6 +23,5 @@ services:
       - "5432:5432"
     volumes:
       - tracegaurd_pgdata:/var/lib/postgresql/data
-
 volumes:
   tracegaurd_pgdata:
