@@ -41,8 +41,8 @@ class IncidentState(TypedDict, total=False):
     generated_at: str
 
 
-def _trace(state: IncidentState, agent: str, output: str):
-    return [*state.get("agent_trace", []), {"agent": agent, "status": "complete", "output": output}]
+def _trace(state: IncidentState, agent: str, output: str, score: int, metric: str, basis: str):
+    return [*state.get("agent_trace", []), {"agent": agent, "status": "complete", "output": output, "confidence": max(0, min(100, int(score))), "metric": metric, "basis": basis}]
 
 
 def _llm():
@@ -53,16 +53,20 @@ def _llm():
 
 
 def ingestion_node(state: IncidentState):
-    events = sorted(state.get("events", []), key=lambda e: e["timestamp"])
-    return {"filtered_events": events, "agent_trace": _trace(state, "Ingestion Agent", f"Normalized {len(events)} events")}
+    events = sorted(state.get("events", []), key=lambda e: e.get("timestamp", ""))
+    valid = sum(1 for e in events if e.get("timestamp") and e.get("service") and e.get("message"))
+    score = round(100 * valid / max(1, len(events)))
+    return {"filtered_events": events, "agent_trace": _trace(state, "Ingestion Agent", f"Normalized {len(events)} events", score, "data_quality", f"{valid}/{len(events)} events contain timestamp, service and message")}
 
 
 def noise_filter_node(state: IncidentState):
     events = state.get("filtered_events", [])
     critical = [e for e in events if e.get("severity") == "critical"]
     warning = [e for e in events if e.get("severity") == "warning"]
-    selected = sorted(critical + warning + [e for e in events if e.get("severity") == "info"], key=lambda e: e["timestamp"])
-    return {"filtered_events": selected, "agent_trace": _trace(state, "Noise Filter Agent", f"Prioritized {len(critical)} critical and {len(warning)} warning signals")}
+    selected = sorted(critical + warning + [e for e in events if e.get("severity") == "info"], key=lambda e: e.get("timestamp", ""))
+    signal_ratio = round(100 * len(critical + warning) / max(1, len(events)))
+    score = min(98, 70 + signal_ratio // 3)
+    return {"filtered_events": selected, "agent_trace": _trace(state, "Noise Filter Agent", f"Prioritized {len(critical)} critical and {len(warning)} warning signals", score, "signal_quality", f"Severity-aware prioritization retained {len(selected)}/{len(events)} signals")}
 
 
 def correlation_node(state: IncidentState):
@@ -75,15 +79,18 @@ def correlation_node(state: IncidentState):
         correlations.append({"change": deployment.get("message", ""), "related_failures": [e.get("message", "") for e in related], "service": deployment.get("service", "unknown")})
     if not correlations and failures:
         correlations.append({"change": "No deployment change detected", "related_failures": [e.get("message", "") for e in failures], "service": failures[0].get("service", "unknown")})
-    return {"correlations": correlations, "agent_trace": _trace(state, "Correlation Agent", f"Linked {len(correlations)} change-to-failure relationships")}
+    linked = sum(len(c.get("related_failures", [])) for c in correlations)
+    score = min(99, 50 + linked * 8 + len(correlations) * 8)
+    return {"correlations": correlations, "agent_trace": _trace(state, "Correlation Agent", f"Linked {len(correlations)} change-to-failure relationships", score, "correlation_strength", f"{linked} failure signals linked to {len(correlations)} causal-change candidates")}
 
 
 def rag_node(state: IncidentState):
     events = state.get("filtered_events", [])
-    query = " ".join(e.get("message", "") for e in events[:12])
-    query += " " + " ".join(c.get("change", "") for c in state.get("correlations", []))
-    context = retrieve(query, top_k=4)
-    return {"rag_context": context, "agent_trace": _trace(state, "RAG Agent", f"Retrieved {len(context)} runbook records")}
+    query = " ".join(e.get("message", "") for e in events[:12]) + " " + " ".join(c.get("change", "") for c in state.get("correlations", []))
+    context = retrieve(query, top_k=5)
+    scores = [float(d.get("score", 0)) for d in context]
+    score = round(100 * sum(scores) / max(1, len(scores))) if scores else 0
+    return {"rag_context": context, "agent_trace": _trace(state, "RAG Agent", f"Retrieved {len(context)} evidence records", score, "retrieval_relevance", f"Mean retrieval relevance across {len(context)} records")}
 
 
 def _fallback_root_cause(state: IncidentState):
@@ -120,7 +127,7 @@ def root_cause_node(state: IncidentState):
             structured = llm.with_structured_output(RootCauseResult)
             evidence = "\n".join(f"- {e.get('timestamp')} | {e.get('service')} | {e.get('severity')} | {e.get('message')}" for e in state.get("filtered_events", []))
             rag = "\n".join(f"- {d['title']}: {d['content']}" for d in state.get("rag_context", []))
-            prompt = f"""You are the Root Cause Agent for an SRE incident. Determine the most defensible root-cause hypothesis from observed evidence. Do not invent facts. Retrieved runbooks are guidance, not incident evidence. Be concise and state uncertainty when evidence is incomplete.
+            prompt = f"""You are the Root Cause Agent for an SRE incident. Determine the most defensible root-cause hypothesis from observed evidence. Do not invent facts. Retrieved knowledge is supporting context, not incident evidence. State uncertainty when evidence is incomplete.
 
 OBSERVED EVENTS:
 {evidence}
@@ -128,14 +135,14 @@ OBSERVED EVENTS:
 CORRELATIONS:
 {state.get('correlations', [])}
 
-RETRIEVED RUNBOOKS:
+RETRIEVED KNOWLEDGE:
 {rag}"""
             result = structured.invoke(prompt)
             llm_used = True
         except Exception:
             result = None
     result = result or _fallback_root_cause(state)
-    return {"root_cause": result.root_cause, "confidence": result.confidence, "summary": result.summary, "hypothesis": result.hypothesis, "evidence": result.evidence, "llm_used": llm_used, "agent_trace": _trace(state, "Root Cause Agent", result.root_cause)}
+    return {"root_cause": result.root_cause, "confidence": result.confidence, "summary": result.summary, "hypothesis": result.hypothesis, "evidence": result.evidence, "llm_used": llm_used, "agent_trace": _trace(state, "Root Cause Agent", result.root_cause, result.confidence, "root_cause_confidence", f"Evidence-supported hypothesis; LLM={llm_used}")}
 
 
 def diagnostic_node(state: IncidentState):
@@ -173,7 +180,8 @@ RUNBOOKS:
             {"action": "Compare current and previous checkout release", "risk": "SAFE", "reason": "Read-only change analysis."},
             {"action": "Rollback checkout deployment", "risk": "APPROVAL", "reason": "Production mutation requires explicit human approval."},
         ]
-    return {"steps": steps, "actions": actions, "agent_trace": _trace(state, "Diagnostic Agent", f"Generated {len(steps)} ordered diagnosis steps")}
+    coverage = min(100, round((len(steps) / 5) * 100))
+    return {"steps": steps, "actions": actions, "agent_trace": _trace(state, "Diagnostic Agent", f"Generated {len(steps)} ordered diagnosis steps", coverage, "diagnostic_coverage", f"{len(steps)} ordered investigation steps with evidence fields")}
 
 
 def guardrail_node(state: IncidentState):
@@ -181,13 +189,17 @@ def guardrail_node(state: IncidentState):
     for action in state.get("actions", []):
         checked = classify_action(action.get("action", ""))
         actions.append({**action, **checked})
-    risk = "APPROVAL_REQUIRED" if any(a.get("risk") == "APPROVAL" for a in actions) else "SAFE"
-    return {"actions": actions, "risk": risk, "agent_trace": _trace(state, "Guardrail Agent", f"Classified {len(actions)} actions")}
+    blocked = sum(1 for a in actions if a.get("risk") == "BLOCKED")
+    approval = sum(1 for a in actions if a.get("risk") == "APPROVAL")
+    score = 100 if blocked == 0 else max(60, 100 - blocked * 20)
+    risk = "APPROVAL_REQUIRED" if approval or blocked else "SAFE"
+    return {"actions": actions, "risk": risk, "agent_trace": _trace(state, "Guardrail Agent", f"Classified {len(actions)} actions; {approval} require human approval", score, "safety_gate", f"Blocked={blocked}, approval_required={approval}, safe={len(actions)-blocked-approval}")}
 
 
 def timeline_node(state: IncidentState):
     timeline = [{"timestamp": e.get("timestamp"), "source": e.get("source"), "service": e.get("service"), "severity": e.get("severity"), "message": e.get("message")} for e in state.get("filtered_events", [])]
-    return {"timeline": timeline, "generated_at": datetime.now(timezone.utc).isoformat(), "agent_trace": _trace(state, "Timeline Agent", f"Built {len(timeline)} chronological evidence records")}
+    score = round(100 * len(timeline) / max(1, len(state.get("events", []))))
+    return {"timeline": timeline, "generated_at": datetime.now(timezone.utc).isoformat(), "agent_trace": _trace(state, "Timeline Agent", f"Built {len(timeline)} chronological evidence records", score, "timeline_completeness", f"{len(timeline)}/{len(state.get('events', []))} source events represented")}
 
 
 def build_graph():
@@ -211,4 +223,25 @@ incident_graph = build_graph()
 
 def run_graph(events: list[dict[str, Any]]):
     result = incident_graph.invoke({"events": events, "agent_trace": []})
-    return {"summary": result.get("summary", ""), "root_cause": result.get("root_cause", ""), "confidence": result.get("confidence", 0), "hypothesis": result.get("hypothesis", ""), "steps": result.get("steps", []), "actions": result.get("actions", []), "evidence": result.get("evidence", []), "rag_context": result.get("rag_context", []), "timeline": result.get("timeline", []), "risk": result.get("risk", "UNKNOWN"), "agent_trace": result.get("agent_trace", []), "llm_used": result.get("llm_used", False), "generated_at": result.get("generated_at", datetime.now(timezone.utc).isoformat())}
+    trace = result.get("agent_trace", [])
+    scores = [int(x.get("confidence", 0)) for x in trace]
+    overall = round(sum(scores) / max(1, len(scores)))
+    return {
+        "summary": result.get("summary", ""), "root_cause": result.get("root_cause", ""), "confidence": result.get("confidence", 0),
+        "hypothesis": result.get("hypothesis", ""), "steps": result.get("steps", []), "actions": result.get("actions", []),
+        "evidence": result.get("evidence", []), "rag_context": result.get("rag_context", []), "timeline": result.get("timeline", []),
+        "risk": result.get("risk", "UNKNOWN"), "agent_trace": trace, "llm_used": result.get("llm_used", False),
+        "generated_at": result.get("generated_at", datetime.now(timezone.utc).isoformat()),
+        "evaluation": {
+            "overall_pipeline_confidence": overall,
+            "root_cause_confidence": result.get("confidence", 0),
+            "agent_count": len(trace),
+            "evidence_count": len(result.get("evidence", [])),
+            "rag_documents": len(result.get("rag_context", [])),
+            "diagnosis_steps": len(result.get("steps", [])),
+            "approval_required": sum(1 for a in result.get("actions", []) if a.get("risk") == "APPROVAL"),
+            "blocked_actions": sum(1 for a in result.get("actions", []) if a.get("risk") == "BLOCKED"),
+            "llm_enabled": bool(result.get("llm_used", False)),
+            "methodology": "Heuristic evidence-weighted confidence; not ground-truth accuracy or a guarantee of correctness."
+        }
+    }
