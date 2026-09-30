@@ -1,11 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 from .models import EventType, IncidentEvent, Severity
 
 
 def checkout_incident() -> list[IncidentEvent]:
     base = datetime.now(timezone.utc).replace(microsecond=0)
-    incident_id = "INC-1001"
+    incident_id = f"INC-{uuid4().hex[:8].upper()}"
 
     return [
         IncidentEvent(
