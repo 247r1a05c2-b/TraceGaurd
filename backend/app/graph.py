@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 from typing import Any, TypedDict
@@ -45,11 +46,25 @@ def _trace(state: IncidentState, agent: str, output: str, score: int, metric: st
     return [*state.get("agent_trace", []), {"agent": agent, "status": "complete", "output": output, "confidence": max(0, min(100, int(score))), "metric": metric, "basis": basis}]
 
 
-def _llm():
-    if not os.getenv("OPENAI_API_KEY"):
+def _gemini_json(prompt: str) -> dict[str, Any] | None:
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
         return None
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"), temperature=0)
+    try:
+        from google import genai
+        client = genai.Client(api_key=api_key)
+        response = client.models.generate_content(
+            model=os.getenv("GEMINI_MODEL", "gemini-2.5-flash"),
+            contents=prompt,
+        )
+        text = (response.text or "").strip()
+        if text.startswith("```"):
+            text = text.strip("`")
+            if text.startswith("json"):
+                text = text[4:]
+        return json.loads(text)
+    except Exception:
+        return None
 
 
 def ingestion_node(state: IncidentState):
@@ -119,41 +134,35 @@ def _fallback_root_cause(state: IncidentState):
 
 
 def root_cause_node(state: IncidentState):
-    llm = _llm()
-    result = None
-    llm_used = False
-    if llm:
-        try:
-            structured = llm.with_structured_output(RootCauseResult)
-            evidence = "\n".join(f"- {e.get('timestamp')} | {e.get('service')} | {e.get('severity')} | {e.get('message')}" for e in state.get("filtered_events", []))
-            rag = "\n".join(f"- {d['title']}: {d['content']}" for d in state.get("rag_context", []))
-            prompt = f"""You are the Root Cause Agent for an SRE incident. Determine the most defensible root-cause hypothesis from observed evidence. Do not invent facts. Retrieved knowledge is supporting context, not incident evidence. State uncertainty when evidence is incomplete.
+    events = "\n".join(f"- {e.get('timestamp')} | {e.get('service')} | {e.get('severity')} | {e.get('message')}" for e in state.get("filtered_events", []))
+    rag = "\n".join(f"- {d.get('title')}: {d.get('content')}" for d in state.get("rag_context", []))
+    prompt = f"""Return only valid JSON with keys root_cause, confidence, summary, evidence, hypothesis. You are the TraceGaurd Root Cause Agent. Determine the most defensible root-cause hypothesis from observed evidence. Do not invent facts. Retrieved knowledge is supporting context, not incident evidence. State uncertainty when evidence is incomplete. Confidence must be an integer from 0 to 100.
 
 OBSERVED EVENTS:
-{evidence}
+{events}
 
 CORRELATIONS:
 {state.get('correlations', [])}
 
 RETRIEVED KNOWLEDGE:
 {rag}"""
-            result = structured.invoke(prompt)
+    result_data = _gemini_json(prompt)
+    result = None
+    llm_used = False
+    if result_data:
+        try:
+            result = RootCauseResult.model_validate(result_data)
             llm_used = True
         except Exception:
             result = None
     result = result or _fallback_root_cause(state)
-    return {"root_cause": result.root_cause, "confidence": result.confidence, "summary": result.summary, "hypothesis": result.hypothesis, "evidence": result.evidence, "llm_used": llm_used, "agent_trace": _trace(state, "Root Cause Agent", result.root_cause, result.confidence, "root_cause_confidence", f"Evidence-supported hypothesis; LLM={llm_used}")}
+    return {"root_cause": result.root_cause, "confidence": result.confidence, "summary": result.summary, "hypothesis": result.hypothesis, "evidence": result.evidence, "llm_used": llm_used, "agent_trace": _trace(state, "Root Cause Agent", result.root_cause, result.confidence, "root_cause_confidence", f"Evidence-supported hypothesis; Gemini={llm_used}")}
 
 
 def diagnostic_node(state: IncidentState):
-    llm = _llm()
-    steps, actions = [], []
-    if llm:
-        try:
-            structured = llm.with_structured_output(DiagnosticResult)
-            events = "\n".join(f"{e.get('timestamp')} | {e.get('service')} | {e.get('message')}" for e in state.get("filtered_events", []))
-            rag = "\n".join(f"{d['title']}: {d['content']}" for d in state.get("rag_context", []))
-            prompt = f"""You are the Diagnostic Agent. Create a safe, evidence-backed investigation plan. Prefer read-only validation. Never make destructive production changes automatically. Return 4-6 ordered diagnosis steps and 3-5 recommended actions. Each step needs stage, finding, evidence. Each action needs action, risk, reason.
+    events = "\n".join(f"{e.get('timestamp')} | {e.get('service')} | {e.get('message')}" for e in state.get("filtered_events", []))
+    rag = "\n".join(f"{d.get('title')}: {d.get('content')}" for d in state.get("rag_context", []))
+    prompt = f"""Return only valid JSON with keys steps and actions. You are the TraceGaurd Diagnostic Agent. Create a safe, evidence-backed investigation plan. Prefer read-only validation. Never make destructive production changes automatically. Return 4-6 ordered diagnosis steps and 3-5 recommended actions. Each step needs stage, finding, evidence. Each action needs action, risk, reason. Use risk SAFE or APPROVAL.
 
 ROOT-CAUSE HYPOTHESIS: {state.get('root_cause')}
 SUMMARY: {state.get('summary')}
@@ -161,7 +170,11 @@ EVENTS:
 {events}
 RUNBOOKS:
 {rag}"""
-            result = structured.invoke(prompt)
+    result_data = _gemini_json(prompt)
+    steps, actions = [], []
+    if result_data:
+        try:
+            result = DiagnosticResult.model_validate(result_data)
             steps, actions = result.steps, result.actions
         except Exception:
             pass
