@@ -1,65 +1,86 @@
-# TraceGaurd
+# TraceGaurd — Multi-Agent AI Incident Commander
 
-## Multi-Agent AI Incident Commander
+TraceGaurd is a hackathon-ready incident operations platform for software engineers and SRE teams. A client sends operational signals; TraceGaurd normalizes them, runs a LangGraph multi-agent investigation, retrieves runbook knowledge with RAG, produces an evidence-backed root-cause hypothesis, evaluates confidence, applies a default-deny guardrail, requests human approval for production mutations, and only then runs a controlled remediation adapter.
 
-TraceGaurd converts noisy logs, alerts, deployments and tickets into an evidence-backed incident investigation. A LangGraph workflow coordinates specialized agents, a local vector RAG layer retrieves runbooks, and an LLM can produce the root-cause hypothesis and diagnosis plan. Guardrails classify every recommended action before it can reach a human reviewer.
+## What changed in this version
 
-### What the demo does
-1. Start the FastAPI backend and React dashboard.
-2. Click **Simulate Incident**.
-3. Select the generated incident.
-4. Watch the LangGraph agent trace execute.
-5. Review the root-cause hypothesis and confidence.
-6. Inspect the ordered diagnosis steps and their evidence.
-7. Inspect the RAG runbooks retrieved for the incident.
-8. Review the chronological evidence timeline.
-9. Review guarded actions: SAFE, APPROVAL, or BLOCKED.
+- **Software engineer authentication** with an 8-hour signed session.
+- **Client monitoring** with a service/environment inventory, incident counts and heartbeats.
+- **Multi-agent incident flow:** Ingestion → Noise Filter → Correlation → RAG → Root Cause → Diagnostic → Guardrail → Timeline.
+- **Evidence-backed confidence percentage** plus evaluation metrics for evidence coverage, workflow completeness and diagnosis quality.
+- **Human-in-the-loop gate:** Guardrail classification happens before the engineer approval step; APPROVAL actions cannot execute without an explicit approval record.
+- **Controlled automatic remediation:** after approval, TraceGaurd calls an allow-listed execution adapter. The demo adapter is simulated and never runs arbitrary shell/Kubernetes/database commands.
+- **Audit trail** for logins, incident ingestion, client registration, human approvals and executions.
+- **Responsive React dashboard** for client monitoring, incident queue, AI investigation, RAG evidence, agent trace, guardrail actions, metrics and timeline.
+- **Deterministic fallback** works without an LLM API key; an OpenAI key enables the existing LLM root-cause and diagnostic generation.
+- **Tests** cover authentication, protected APIs, analysis, metrics and approval-before-execution.
 
-### Architecture
+## Architecture
 
-`Logs / Alerts / Deployments / Tickets → Ingestion → Noise Filter → Correlation → RAG Retrieval → Root Cause Agent → Diagnostic Agent → Guardrail Agent → Timeline Agent → React Dashboard`
+```text
+Client Systems
+  ├── Logs / Alerts / Deployments / Tickets
+  └── Heartbeats
+          ↓
+Ingestion & Normalization
+          ↓
+LangGraph Multi-Agent Engine
+  Ingestion → Noise Filter → Correlation → RAG
+                    ↓
+             Root Cause Agent
+                    ↓
+             Diagnostic Agent
+                    ↓
+             Guardrail Agent
+                    ↓
+          Human Engineer Approval
+             ↙             ↘
+          Reject        Approve
+                           ↓
+                 Controlled Executor
+                           ↓
+                    Audit Timeline
+                           ↓
+                    React Dashboard
+```
 
-### Multi-agent roles
+## Agents
 
 | Agent | Responsibility |
 |---|---|
-| Ingestion Agent | Normalizes incident events into a shared state |
+| Ingestion Agent | Normalizes heterogeneous events into a shared state |
 | Noise Filter Agent | Prioritizes critical and warning signals |
-| Correlation Agent | Links deployments, symptoms, services and dependency failures |
-| RAG Agent | Retrieves the most relevant runbooks with TF-IDF cosine similarity |
-| Root Cause Agent | Uses LLM + incident evidence + retrieved runbooks to form a hypothesis |
-| Diagnostic Agent | Produces ordered, evidence-backed investigation steps |
-| Guardrail Agent | Applies default-deny safety classification to actions |
-| Timeline Agent | Builds an auditable chronological incident history |
+| Correlation Agent | Connects deployments, failures, services and dependencies |
+| RAG Agent | Retrieves relevant runbooks/knowledge |
+| Root Cause Agent | Generates a defensible hypothesis from observed evidence |
+| Diagnostic Agent | Creates ordered investigation steps and candidate actions |
+| Guardrail Agent | Classifies actions as SAFE, APPROVAL or BLOCKED |
+| Timeline Agent | Builds the auditable chronological evidence history |
 
-### Stack
+## Confidence and evaluation
 
-- Frontend: React + Vite
-- Backend: FastAPI + Python
-- Agent orchestration: LangGraph StateGraph
-- LLM: OpenAI through LangChain, optional via `OPENAI_API_KEY`
-- RAG: local TF-IDF vector retrieval with cosine similarity
-- Storage: in-memory demo store, PostgreSQL-ready structure
-- Testing: Pytest
-- Deployment: Docker files are included, but Docker is not required for local development
+The dashboard shows a percentage for **root-cause confidence**. This is an evidence-supported hypothesis score, not a claim that the AI is certainly correct. The evaluation panel also exposes evidence coverage, workflow completeness and diagnosis quality so judges can see how the result was produced.
 
-### Run without Docker
+## Human approval and remediation
 
-#### 1. Backend
+TraceGaurd intentionally separates **AI recommendation**, **guardrail classification**, **human approval**, and **execution**. An APPROVAL action cannot be executed by the API until the authenticated software engineer creates an approval record. The demo executor uses an explicit allow-list and returns `SIMULATED_SUCCESS`; connect a signed production-specific adapter before performing real infrastructure mutations.
+
+## Run without Docker
+
+### Backend — Windows
 
 ```bash
 cd backend
 python -m venv .venv
-.venv\Scripts\activate
+.venv\\Scripts\\activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+cd ..
+uvicorn backend.app.main:app --reload --port 8000
 ```
 
-The API will be available at `http://localhost:8000` and Swagger at `http://localhost:8000/docs`.
+### Frontend
 
-#### 2. Frontend
-
-Open a second terminal:
+Open another terminal:
 
 ```bash
 cd frontend
@@ -67,27 +88,50 @@ npm install
 npm run dev
 ```
 
-Open the Vite URL shown in the terminal, normally `http://localhost:5173`.
+Open the Vite URL, normally `http://localhost:5173`.
 
-#### 3. Optional LLM mode
-
-Copy `.env.example` to `.env` and set your OpenAI key:
+### Demo login
 
 ```text
+Email: engineer@tracegaurd.ai
+Password: TraceGaurd@123
+```
+
+For a real deployment, change these values with environment variables:
+
+```text
+DEMO_ENGINEER_EMAIL=your-engineer@example.com
+DEMO_ENGINEER_PASSWORD=use-a-strong-secret
+TRACEGAURD_SECRET=use-a-long-random-signing-secret
 OPENAI_API_KEY=your_key_here
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-Without a key, TraceGaurd still runs using the deterministic evidence-backed fallback. With a key, the Root Cause Agent and Diagnostic Agent use the LLM while the RAG and guardrail layers remain explicit and inspectable.
+## Demo flow for the hackathon
 
-### Demo scenario
+1. Login as a software engineer.
+2. See the monitored client/service inventory.
+3. Click **Simulate Client Incident**.
+4. Open the generated incident.
+5. Show the LangGraph agent trace executing in order.
+6. Show the RAG evidence and root-cause hypothesis.
+7. Explain the confidence percentage and evaluation metrics.
+8. Open Guardrail & Remediation.
+9. Approve the production-style action as the human reviewer.
+10. TraceGaurd executes the allow-listed demo adapter and records the action in the audit trail.
 
-The built-in checkout scenario contains a deployment followed by HTTP 500 errors and database connection-pool timeout signals. TraceGaurd correlates those signals, retrieves the relevant runbooks, produces a root-cause hypothesis, and generates safe diagnosis steps before presenting any production mutation as requiring human approval.
+## Tests
 
-### Safety model
+```bash
+python -m pytest -q
+```
 
-- **SAFE**: read-only or reversible diagnostic actions
-- **APPROVAL**: production mutations such as rollback or restart
-- **BLOCKED**: destructive, unknown or disallowed actions
+The test suite verifies that protected endpoints require login, incidents are analyzed through the agent pipeline, metrics are exposed, and an APPROVAL action cannot execute until an explicit human approval is recorded.
 
-TraceGaurd does not execute production mutations automatically in the prototype.
+## Deployment
+
+Docker files already exist for the project, but Docker is **not required** for the local hackathon demo. The frontend can be deployed to Vercel/Netlify and the FastAPI service to Render or another Python host.
+
+## NexaRAG relationship
+
+The separate `NexaRAG` repository contains reusable incident/RAG work. TraceGaurd is now the integrated application repository: its RAG layer, multi-agent workflow, client monitoring, human approval gate and dashboard are all exercised from one project. The RAG implementation can later be replaced by the richer NexaRAG knowledge service without changing the guardrail/approval contract.
