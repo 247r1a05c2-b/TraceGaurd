@@ -1,14 +1,30 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import os
 
 from sqlalchemy import DateTime, Integer, String, Text, create_engine, inspect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "tracegaurd.db"
-DATABASE_URL = f"sqlite:///{DB_PATH}"
+DEFAULT_DB_PATH = BASE_DIR / "tracegaurd.db"
+RAW_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+if RAW_DATABASE_URL:
+    if RAW_DATABASE_URL.startswith("postgres://"):
+        DATABASE_URL = "postgresql+psycopg://" + RAW_DATABASE_URL[len("postgres://"):]
+    elif RAW_DATABASE_URL.startswith("postgresql://"):
+        DATABASE_URL = "postgresql+psycopg://" + RAW_DATABASE_URL[len("postgresql://"):]
+    else:
+        DATABASE_URL = RAW_DATABASE_URL
+else:
+    DATABASE_URL = f"sqlite:///{DEFAULT_DB_PATH}"
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+engine_kwargs = {"pool_pre_ping": True}
+if IS_SQLITE:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, **engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
@@ -121,7 +137,13 @@ def init_db() -> None:
 def database_status() -> dict:
     inspector = inspect(engine)
     tables = inspector.get_table_names()
-    return {"status": "CONNECTED", "engine": "SQLite", "path": str(DB_PATH), "tables": tables, "table_count": len(tables)}
+    return {
+        "status": "CONNECTED",
+        "engine": "SQLite" if IS_SQLITE else "PostgreSQL",
+        "persistent": not IS_SQLITE,
+        "tables": tables,
+        "table_count": len(tables),
+    }
 
 
 init_db()
