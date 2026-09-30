@@ -61,7 +61,7 @@ def noise_filter_node(state: IncidentState):
     events = state.get("filtered_events", [])
     critical = [e for e in events if e.get("severity") == "critical"]
     warning = [e for e in events if e.get("severity") == "warning"]
-    selected = critical + warning + [e for e in events if e.get("severity") == "info"]
+    selected = sorted(critical + warning + [e for e in events if e.get("severity") == "info"], key=lambda e: e["timestamp"])
     return {"filtered_events": selected, "agent_trace": _trace(state, "Noise Filter Agent", f"Prioritized {len(critical)} critical and {len(warning)} warning signals")}
 
 
