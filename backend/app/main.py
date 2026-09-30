@@ -14,7 +14,7 @@ from .guardrails import classify_action
 from .models import IncidentSummary, IngestRequest, IngestResponse
 from .monitoring import audit_log, clients, execute_approved_action, execution_log, heartbeat, record_audit, register_client
 from .normalizer import normalize_events
-from .security import DEMO_EMAIL, issue_token, verify_credentials, verify_token
+from .security import issue_token, verify_credentials, verify_token
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
@@ -105,8 +105,10 @@ def simulate(scenario: str, engineer: str = Depends(current_engineer)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     normalized = normalize_events(events)
     store.add_many(normalized)
+    event_services = {str(e.service).lower() for e in normalized}
     for client in clients.values():
-        if any(e.get("service") == client["service"] for e in [x.model_dump() for x in normalized]):
+        service = client["service"].lower()
+        if service in event_services or any(service.split("-")[0] in item for item in event_services):
             client["incidents"] += 1
     record_audit("INCIDENT_INGESTED", engineer, {"scenario": scenario, "events": len(normalized)})
     return IngestResponse(accepted=len(normalized), incident_ids=sorted({e.incident_id for e in normalized}))
