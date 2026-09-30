@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from time import perf_counter
 
@@ -11,15 +12,43 @@ execution_log: list[dict[str, Any]] = []
 
 
 def register_client(name: str, environment: str, service: str, website_url: str | None = None, health_path: str = "/") -> dict[str, Any]:
+    if website_url:
+        parsed = urlparse(website_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("website_url must be a valid http or https URL")
     client_id = f"client-{uuid4().hex[:8]}"
     client = {
-        "client_id": client_id, "name": name, "environment": environment, "service": service,
-        "website_url": website_url, "health_path": health_path or "/", "status": "MONITORING",
-        "last_seen": datetime.now(timezone.utc).isoformat(), "last_response_ms": None,
-        "last_http_status": None, "incidents": 0,
+        "client_id": client_id,
+        "name": name,
+        "environment": environment,
+        "service": service,
+        "website_url": website_url,
+        "health_path": health_path or "/",
+        "status": "MONITORING" if website_url else "ONLINE",
+        "last_seen": datetime.now(timezone.utc).isoformat(),
+        "last_response_ms": None,
+        "last_http_status": None,
+        "incidents": 0,
     }
     clients[client_id] = client
     return client
+
+
+def hydrate_clients(records: list[dict[str, Any]]) -> None:
+    for record in records:
+        clients[record["id"]] = {
+            "client_id": record["id"],
+            "name": record["name"],
+            "environment": record["environment"],
+            "service": record["service"],
+            "website_url": record.get("website_url"),
+            "health_path": record.get("health_path") or "/",
+            "status": record.get("status") or "ONLINE",
+            "last_seen": record.get("last_seen"),
+            "last_response_ms": record.get("last_response_ms"),
+            "last_http_status": record.get("last_http_status"),
+            "incidents": int(record.get("incidents") or 0),
+        }
 
 
 def heartbeat(client_id: str) -> dict[str, Any]:
