@@ -12,4 +12,6 @@ def test_graph_contains_multi_agent_trace_and_rag():
     assert len(result["agent_trace"]) == 8
     assert len(result["rag_context"]) == 4
     assert len(result["steps"]) >= 4
+    assert result["actions"]
+    assert any(action.get("risk") == "APPROVAL" for action in result["actions"])
     assert result["risk"] == "APPROVAL_REQUIRED"
