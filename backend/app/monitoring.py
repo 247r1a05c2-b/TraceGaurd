@@ -7,26 +7,47 @@ from urllib.request import Request, urlopen
 from time import perf_counter
 import json
 
-from .database import AuditRecord, SessionLocal
+from .database import AuditRecord, ClientRecord, SessionLocal
 
 clients: dict[str, dict[str, Any]] = {}
 audit_log: list[dict[str, Any]] = []
 execution_log: list[dict[str, Any]] = []
 
 
+def _identity(name: str, environment: str, service: str, website_url: str | None) -> tuple[str, str, str, str]:
+    return (
+        name.strip().casefold(),
+        environment.strip().casefold(),
+        service.strip().casefold(),
+        (website_url or "").strip().rstrip("/").casefold(),
+    )
+
+
 def register_client(name: str, environment: str, service: str, website_url: str | None = None, health_path: str = "/") -> dict[str, Any]:
+    name = name.strip()
+    environment = environment.strip()
+    service = service.strip()
+    website_url = website_url.strip().rstrip("/") if website_url else None
+    health_path = (health_path or "/").strip() or "/"
     if website_url:
         parsed = urlparse(website_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("website_url must be a valid http or https URL")
-    client_id = f"client-{uuid4().hex[:8]}"
+    identity = _identity(name, environment, service, website_url)
+    if any(_identity(str(item.get("name", "")), str(item.get("environment", "")), str(item.get("service", "")), item.get("website_url")) == identity for item in clients.values()):
+        raise ValueError("A client with the same name, environment, service and website is already registered")
+    with SessionLocal() as session:
+        for record in session.query(ClientRecord).all():
+            if _identity(record.name, record.environment, record.service, record.website_url) == identity:
+                raise ValueError("A client with the same name, environment, service and website is already registered")
+    client_id = f"client-{uuid4().hex[:12]}"
     client = {
         "client_id": client_id,
         "name": name,
         "environment": environment,
         "service": service,
         "website_url": website_url,
-        "health_path": health_path or "/",
+        "health_path": health_path,
         "status": "MONITORING" if website_url else "ONLINE",
         "last_seen": datetime.now(timezone.utc).isoformat(),
         "last_response_ms": None,
@@ -104,8 +125,9 @@ def record_audit(event: str, actor: str, details: dict[str, Any]) -> None:
 
 def _client_event_matches(event: Any, client: dict[str, Any]) -> bool:
     metadata = getattr(event, "metadata", {}) or {}
-    if metadata.get("client_id") == client["client_id"]:
-        return True
+    event_client_id = metadata.get("client_id")
+    if event_client_id is not None:
+        return str(event_client_id) == str(client["client_id"])
     return str(getattr(event, "service", "")).lower() == str(client.get("service", "")).lower()
 
 
@@ -158,4 +180,7 @@ def execute_approved_action(incident_id: str, action: str, actor: str) -> dict[s
 
 
 for name, environment, service in [("Acme Checkout", "production", "checkout-api"), ("FinServe Payments", "staging", "payments-api"), ("RetailHub Orders", "production", "orders-api")]:
-    register_client(name, environment, service)
+    try:
+        register_client(name, environment, service)
+    except ValueError:
+        pass
