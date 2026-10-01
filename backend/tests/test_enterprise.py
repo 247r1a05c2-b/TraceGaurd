@@ -1,8 +1,9 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.enterprise import cache
+from app.enterprise import cache, install_enterprise
 
+install_enterprise(app)
 client = TestClient(app)
 
 
@@ -15,7 +16,8 @@ def test_liveness_probe():
 def test_readiness_probe():
     response = client.get("/health/ready")
     assert response.status_code in {200, 503}
-    assert "database" in response.json().get("detail", response.json())
+    payload = response.json()
+    assert "database" in payload.get("detail", payload)
 
 
 def test_prometheus_endpoint():
