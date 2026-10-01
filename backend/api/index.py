@@ -19,7 +19,7 @@ from app.security import verify_token
 
 @app.exception_handler(IntegrityError)
 async def handle_database_integrity_error(request: Request, exc: IntegrityError):
-    path = request.url.path
+    path = request.url.path.rstrip("/")
     if path.startswith("/api/v1/incidents/") and path.endswith("/approve"):
         try:
             payload = await request.json()
@@ -32,44 +32,16 @@ async def handle_database_integrity_error(request: Request, exc: IntegrityError)
         credentials = request.headers.get("Authorization", "")
         token = credentials[7:] if credentials.lower().startswith("bearer ") else ""
         engineer = verify_token(token) or "unknown-engineer"
-        approval_id = f"approval-{uuid4().hex[:12]}"
+        approval_id = f"approval-{uuid4().hex[:16]}"
         state = "APPROVED" if approved else "REJECTED"
         try:
             with SessionLocal() as session:
-                session.add(
-                    ApprovalRecord(
-                        id=approval_id,
-                        incident_id=incident_id,
-                        action=action,
-                        engineer=engineer,
-                        state=state,
-                    )
-                )
+                session.add(ApprovalRecord(id=approval_id, incident_id=incident_id, action=action, engineer=engineer, state=state))
                 session.commit()
-        except Exception:
-            pass
-        record_audit(
-            "HUMAN_APPROVAL",
-            engineer,
-            {
-                "incident_id": incident_id,
-                "action": action,
-                "state": state,
-                "approval_id": approval_id,
-                "recovered_from_duplicate_id": True,
-            },
-        )
-        return JSONResponse(
-            status_code=200,
-            content={
-                "approval_id": approval_id,
-                "incident_id": incident_id,
-                "action": action,
-                "state": state,
-                "guardrail": {"risk": "APPROVAL", "message": "Human approval recorded safely."},
-                "recovered": True,
-            },
-        )
+        except Exception as recovery_error:
+            return JSONResponse(status_code=409, content={"detail": f"Approval could not be persisted safely: {type(recovery_error).__name__}"})
+        record_audit("HUMAN_APPROVAL", engineer, {"incident_id": incident_id, "action": action, "state": state, "approval_id": approval_id, "recovered_from_integrity_error": True})
+        return JSONResponse(status_code=200, content={"approval_id": approval_id, "incident_id": incident_id, "action": action, "state": state, "guardrail": {"risk": "APPROVAL", "message": "Human approval recorded safely."}, "recovered": True})
     raise exc
 
 
