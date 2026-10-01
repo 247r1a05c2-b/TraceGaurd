@@ -1,0 +1,82 @@
+/* TraceGaurd modal contrast fix */
+.modal-backdrop,
+.confirm-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 9999 !important;
+  display: grid !important;
+  place-items: center !important;
+  padding: 24px !important;
+  background: rgba(2, 6, 23, 0.88) !important;
+  backdrop-filter: blur(7px) saturate(80%) !important;
+  -webkit-backdrop-filter: blur(7px) saturate(80%) !important;
+}
+
+.modal-backdrop::before,
+.confirm-backdrop::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.16);
+  pointer-events: none;
+}
+
+.modal-backdrop > .modal,
+.confirm-backdrop > .confirm-card {
+  position: relative !important;
+  z-index: 1 !important;
+  opacity: 1 !important;
+  filter: none !important;
+  background: #ffffff !important;
+  color: #172033 !important;
+  border: 1px solid #d8e1e8 !important;
+  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.45) !important;
+}
+
+.modal-backdrop > .modal h3,
+.confirm-backdrop > .confirm-card h3 {
+  color: #172033 !important;
+}
+
+.modal-backdrop > .modal p,
+.confirm-backdrop > .confirm-card p {
+  color: #64748b !important;
+}
+
+html[data-theme="dark"] .modal-backdrop > .modal,
+html[data-theme="dark"] .confirm-backdrop > .confirm-card {
+  background: #101923 !important;
+  color: #edf7f7 !important;
+  border-color: #263b49 !important;
+}
+
+html[data-theme="dark"] .modal-backdrop > .modal h3,
+html[data-theme="dark"] .confirm-backdrop > .confirm-card h3 {
+  color: #edf7f7 !important;
+}
+
+html[data-theme="dark"] .modal-backdrop > .modal p,
+html[data-theme="dark"] .confirm-backdrop > .confirm-card p {
+  color: #8ca0ad !important;
+}
+
+.confirm-card {
+  width: min(460px, 100%) !important;
+  border-radius: 22px !important;
+  padding: 32px !important;
+}
+
+.confirm-actions {
+  margin-top: 28px !important;
+}
+
+@media (max-width: 640px) {
+  .modal-backdrop,
+  .confirm-backdrop {
+    padding: 16px !important;
+  }
+
+  .confirm-card {
+    padding: 24px !important;
+  }
+}
