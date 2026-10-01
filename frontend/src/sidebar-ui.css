@@ -1,0 +1,87 @@
+/* Sidebar usability polish: visual-only, no application workflow changes. */
+
+.shell > aside {
+  height: 100vh;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(88, 230, 223, .34) transparent;
+  overscroll-behavior: contain;
+  padding-bottom: 18px;
+}
+
+.shell > aside::-webkit-scrollbar {
+  width: 6px;
+}
+
+.shell > aside::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.shell > aside::-webkit-scrollbar-thumb {
+  background: rgba(88, 230, 223, .30);
+  border-radius: 999px;
+}
+
+.shell > aside::-webkit-scrollbar-thumb:hover {
+  background: rgba(88, 230, 223, .55);
+}
+
+/* Keep the single theme control inside the sidebar instead of floating over the app. */
+.shell > aside .theme-toggle {
+  position: static !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  transform: none !important;
+  width: 100%;
+  margin: 8px 0 9px;
+  min-height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  z-index: auto;
+}
+
+.shell > aside .theme-toggle:hover {
+  transform: translateY(-1px) !important;
+}
+
+.side-bottom {
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+@media (max-height: 760px) {
+  .shell > aside {
+    padding-top: 20px;
+  }
+
+  .side-label {
+    margin-top: 24px;
+  }
+
+  .nav {
+    padding-top: 9px;
+    padding-bottom: 9px;
+  }
+
+  .engineer {
+    margin-top: 12px;
+    margin-bottom: 10px;
+  }
+}
+
+@media (max-width: 900px) {
+  .shell > aside {
+    width: 220px;
+  }
+
+  main {
+    margin-left: 220px;
+    width: calc(100% - 220px);
+  }
+}
