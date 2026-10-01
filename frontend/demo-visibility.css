@@ -1,0 +1,8 @@
+/* The RCA demo is intentionally available from Overview only. */
+.shell main:not(:has(.hero-card)) .top-actions > .primary {
+  display: none;
+}
+
+.shell main:not(:has(.hero-card)) .top-actions {
+  min-width: 170px;
+}
