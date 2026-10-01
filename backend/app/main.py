@@ -2,6 +2,7 @@ from collections import Counter
 from datetime import datetime, timezone
 import json
 import os
+from uuid import uuid4
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -12,16 +13,16 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 from .agents import run_agents
-from .database import ClientRecord, UserRecord, database_status, SessionLocal
+from .database import AuditRecord, ClientRecord, UserRecord, database_status, SessionLocal
 from .guardrails import classify_action
 from .models import IncidentEvent, IncidentSummary, IngestRequest, IngestResponse, Severity
-from .monitoring import audit_log, clients, execute_approved_action, execution_log, heartbeat, check_website, hydrate_clients, record_audit, register_client
+from .monitoring import audit_log, calculate_client_score, clients, execute_approved_action, execution_log, heartbeat, check_website, hydrate_clients, record_audit, register_client
 from .normalizer import normalize_events
 from .security import issue_token, verify_credentials, verify_token
 from .simulator import available_scenarios, generate_scenario
 from .store import store
 
-app = FastAPI(title="TraceGaurd API", version="4.0.0", description="Multi-client incident monitoring, multi-agent RCA, RAG evidence, human guardrails and controlled remediation")
+app = FastAPI(title="TraceGaurd API", version="4.1.0", description="Multi-client incident monitoring, multi-agent RCA, RAG evidence, human guardrails and controlled remediation")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 bearer = HTTPBearer(auto_error=False)
 
@@ -79,9 +80,33 @@ def persist_client(client: dict) -> None:
         session.commit()
 
 
+def persisted_audits() -> list[dict]:
+    with SessionLocal() as session:
+        rows = session.query(AuditRecord).order_by(AuditRecord.created_at.asc()).all()
+    result = []
+    for row in rows:
+        try:
+            details = json.loads(row.details or "{}")
+        except Exception:
+            details = {}
+        result.append({"timestamp": row.created_at.isoformat() if row.created_at else None, "event": row.event, "actor": row.actor, "details": details})
+    return result
+
+
+def client_score(client_id: str) -> dict:
+    client = clients.get(client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    events = []
+    for incident_id in store.incidents():
+        events.extend(store.get(incident_id))
+    score = calculate_client_score(client, events, persisted_audits())
+    return {"client_id": client_id, "client_name": client["name"], **score}
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "service": "tracegaurd-api", "version": "4.0.0", "database": database_status(), "clients": len(clients)}
+    return {"status": "ok", "service": "tracegaurd-api", "version": "4.1.0", "database": database_status(), "clients": len(clients)}
 
 
 @app.get("/api/v1/database/status")
@@ -114,7 +139,18 @@ def scenarios(engineer: str = Depends(current_engineer)):
 
 @app.get("/api/v1/clients")
 def list_clients(engineer: str = Depends(current_engineer)):
-    return list(clients.values())
+    result = []
+    for client in clients.values():
+        item = dict(client)
+        item["performance"] = client_score(client["client_id"])
+        item["score"] = item["performance"]["score"]
+        result.append(item)
+    return result
+
+
+@app.get("/api/v1/clients/{client_id}/score")
+def get_client_score(client_id: str, engineer: str = Depends(current_engineer)):
+    return client_score(client_id)
 
 
 @app.post("/api/v1/clients")
@@ -125,7 +161,23 @@ def add_client(request: ClientRequest, engineer: str = Depends(current_engineer)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     persist_client(client)
     record_audit("CLIENT_REGISTERED", engineer, client)
+    client["performance"] = client_score(client["client_id"])
+    client["score"] = client["performance"]["score"]
     return client
+
+
+@app.delete("/api/v1/clients/{client_id}")
+def delete_client(client_id: str, engineer: str = Depends(current_engineer)):
+    client = clients.pop(client_id, None)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    with SessionLocal() as session:
+        record = session.get(ClientRecord, client_id)
+        if record is not None:
+            session.delete(record)
+            session.commit()
+    record_audit("CLIENT_REMOVED", engineer, {"client_id": client_id, "name": client.get("name")})
+    return {"removed": True, "client_id": client_id, "name": client.get("name"), "message": "Client removed from active monitoring. Historical incidents are preserved."}
 
 
 @app.post("/api/v1/clients/{client_id}/heartbeat")
@@ -134,7 +186,7 @@ def client_heartbeat(client_id: str, engineer: str = Depends(current_engineer)):
         result = heartbeat(client_id)
         persist_client(result)
         record_audit("CLIENT_HEARTBEAT", engineer, {"client_id": client_id})
-        return result
+        return {**result, "performance": client_score(client_id), "score": client_score(client_id)["score"]}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Client not found") from exc
 
@@ -158,15 +210,46 @@ def client_check(client_id: str, engineer: str = Depends(current_engineer)):
             source="alert",
             service=client["service"],
             severity=Severity.critical if result.get("status") == "DOWN" else Severity.warning,
-            message=f"Website health check failed for {result['url']}: status={status_text}; response_ms={result['response_ms']}; error={result.get('error', 'unhealthy response')}",
-            metadata={"client_id": client_id, "website_url": result["url"], "http_status": result.get("http_status"), "response_ms": result["response_ms"]},
+            message=f"{client['name']} website health check failed for {result['url']}: status={status_text}; response_ms={result['response_ms']}; error={result.get('error', 'unhealthy response')}",
+            metadata={"client_id": client_id, "client_name": client["name"], "website_url": result["url"], "http_status": result.get("http_status"), "response_ms": result["response_ms"], "tokens": max(1, len(result.get("error", "")) // 4)},
         )
         store.add_many([event])
         client["incidents"] += 1
         persist_client(client)
-        record_audit("CLIENT_INCIDENT_CREATED", client_id, {"incident_id": incident_id, "reason": event.message})
+        record_audit("CLIENT_INCIDENT_CREATED", client_id, {"client_id": client_id, "incident_id": incident_id, "reason": event.message})
         result["incident_id"] = incident_id
+    result["performance"] = client_score(client_id)
+    result["score"] = result["performance"]["score"]
     return result
+
+
+@app.post("/api/v1/clients/{client_id}/simulate-incident", response_model=IngestResponse)
+def simulate_client_incident(client_id: str, engineer: str = Depends(current_engineer)):
+    client = clients.get(client_id)
+    if client is None:
+        raise HTTPException(status_code=404, detail="Client not found")
+    incident_id = f"INC-{uuid4().hex[:10]}"
+    variant = sum(ord(char) for char in client_id) % 4
+    patterns = [
+        ("Database connection-pool pressure", "checkout deployment increased database connection demand; connection-pool timeouts and HTTP 500s followed"),
+        ("Upstream payment-provider latency", "payment provider latency increased after the release; upstream timeouts caused elevated HTTP 502 and checkout failures"),
+        ("Cache saturation after deployment", "cache hit ratio dropped after deployment; cache misses increased application latency and produced HTTP 500 responses"),
+        ("Rate-limit configuration regression", "a new rate-limit configuration rejected normal client traffic and produced elevated HTTP 429 responses"),
+    ]
+    root_hint, failure_hint = patterns[variant]
+    events = [
+        IncidentEvent(incident_id=incident_id, source="deployment", service=client["service"], severity=Severity.warning, message=f"{client['name']} deployment completed in {client['environment']}: {root_hint}", metadata={"client_id": client_id, "client_name": client["name"], "tokens": 34}),
+        IncidentEvent(incident_id=incident_id, source="log", service=client["service"], severity=Severity.critical, message=f"{client['name']} application error: {failure_hint}", metadata={"client_id": client_id, "client_name": client["name"], "tokens": 42}),
+        IncidentEvent(incident_id=incident_id, source="alert", service=client["service"], severity=Severity.critical, message=f"{client['name']} health monitor detected elevated failure rate for {client.get('website_url') or client['service']}", metadata={"client_id": client_id, "client_name": client["name"], "tokens": 26}),
+        IncidentEvent(incident_id=incident_id, source="ticket", service=client["service"], severity=Severity.warning, message=f"Customer support reports {client['name']} service degradation during the incident window", metadata={"client_id": client_id, "client_name": client["name"], "tokens": 22}),
+    ]
+    store.add_many(events)
+    client["incidents"] += 1
+    client["status"] = "DEGRADED"
+    client["last_seen"] = datetime.now(timezone.utc).isoformat()
+    persist_client(client)
+    record_audit("CLIENT_INCIDENT_SIMULATED", client_id, {"client_id": client_id, "client_name": client["name"], "incident_id": incident_id, "root_hint": root_hint})
+    return IngestResponse(accepted=len(events), incident_ids=[incident_id])
 
 
 @app.post("/api/v1/simulate/{scenario}", response_model=IngestResponse)
@@ -201,8 +284,13 @@ def list_incidents(engineer: str = Depends(current_engineer)):
     summaries = []
     for incident_id in store.incidents():
         events = store.get(incident_id)
+        if not events:
+            continue
         severity = max(events, key=lambda e: severity_order[e.severity.value]).severity
-        summaries.append(IncidentSummary(incident_id=incident_id, title=f"Incident {incident_id}", status="OPEN", severity=severity, event_count=len(events)))
+        client_id = store.incident_client_id(incident_id) or next((e.metadata.get("client_id") for e in events if e.metadata.get("client_id")), None)
+        client_name = clients.get(client_id, {}).get("name") if client_id else None
+        title = f"{client_name} incident" if client_name else f"Incident {incident_id}"
+        summaries.append(IncidentSummary(incident_id=incident_id, client_id=client_id, title=title, status="OPEN", severity=severity, event_count=len(events)))
     return summaries
 
 
@@ -219,7 +307,11 @@ def incident_analysis(incident_id: str, engineer: str = Depends(current_engineer
     events = store.get(incident_id)
     if not events:
         raise HTTPException(status_code=404, detail="Incident not found")
+    client_id = store.incident_client_id(incident_id) or next((e.metadata.get("client_id") for e in events if e.metadata.get("client_id")), None)
     result = run_agents([event.model_dump(mode="json") for event in events])
+    result["client_id"] = client_id
+    result["client"] = clients.get(client_id) if client_id else None
+    result["client_performance"] = client_score(client_id) if client_id and client_id in clients else None
     result["diagnosis_steps"] = result.get("diagnosis_steps") or result.get("steps", [])
     result["repair_steps"] = result.get("repair_steps") or [{"stage": "Prepare safe remediation", "finding": action.get("action", ""), "validation": action.get("reason", "")} for action in result.get("actions", [])]
     result["evaluation"] = evaluate_analysis(result)
@@ -232,10 +324,10 @@ def evaluate_analysis(result: dict) -> dict:
     rag_count = len(result.get("rag_context", []))
     trace_count = len(result.get("agent_trace", []))
     confidence = int(result.get("confidence", 0))
-    evidence_score = min(100, evidence_count * 15 + rag_count * 10)
-    workflow_score = min(100, trace_count * 12)
-    consistency = min(100, round((confidence * 0.55) + (evidence_score * 0.25) + (workflow_score * 0.20)))
-    return {"root_cause_confidence": confidence, "evidence_coverage": evidence_score, "workflow_completeness": workflow_score, "diagnosis_quality": consistency, "explanation": "Confidence is an evidence-weighted hypothesis score, not a guarantee of correctness."}
+    evidence_score = min(85, evidence_count * 12 + rag_count * 8)
+    workflow_score = min(85, trace_count * 10)
+    consistency = min(85, round((confidence * 0.55) + (evidence_score * 0.25) + (workflow_score * 0.20)))
+    return {"root_cause_confidence": min(85, confidence), "evidence_coverage": evidence_score, "workflow_completeness": workflow_score, "diagnosis_quality": consistency, "explanation": "Confidence is an evidence-weighted hypothesis score and is capped at 85 in the presentation metrics."}
 
 
 @app.post("/api/v1/incidents/{incident_id}/approve")
@@ -289,12 +381,12 @@ def metrics(engineer: str = Depends(current_engineer)):
     action_count = len(execution_log)
     approvals = sum(1 for x in audit_log if x.get("event") == "HUMAN_APPROVAL" and x.get("details", {}).get("state") == "APPROVED")
     blocked = sum(1 for x in audit_log if x.get("event") == "HUMAN_APPROVAL" and x.get("details", {}).get("state") == "REJECTED")
-    return {"active_incidents": incident_count, "clients_monitored": len(clients), "actions_executed": action_count, "human_approvals": approvals, "human_rejections": blocked, "audit_events": len(audit_log), "uptime_status": "OPERATIONAL", "database": database_status(), "timestamp": datetime.now(timezone.utc).isoformat(), "severity_distribution": dict(Counter(e.severity.value for i in store.incidents() for e in store.get(i)))}
+    return {"active_incidents": incident_count, "clients_monitored": len(clients), "actions_executed": action_count, "human_approvals": approvals, "human_rejections": blocked, "audit_events": len(persisted_audits()), "uptime_status": "OPERATIONAL", "database": database_status(), "timestamp": datetime.now(timezone.utc).isoformat(), "severity_distribution": dict(Counter(e.severity.value for i in store.incidents() for e in store.get(i)))}
 
 
 @app.get("/api/v1/audit")
 def audit(engineer: str = Depends(current_engineer)):
-    return list(reversed(audit_log[-100:]))
+    return list(reversed(persisted_audits()[-100:]))
 
 
 from .client_gateway import authenticate_client
@@ -307,17 +399,16 @@ def client_ingest(request: IngestRequest, http_request: Request):
         raise HTTPException(status_code=401, detail="Valid X-TraceGaurd-Client-ID is required")
     authenticate_client(http_request, client_id)
     normalized = normalize_events(request.events)
+    for event in normalized:
+        event.metadata["client_id"] = client_id
+        event.metadata["client_name"] = clients[client_id]["name"]
+        if not event.metadata.get("tokens"):
+            event.metadata["tokens"] = max(1, len(event.message) // 4)
     store.add_many(normalized)
     client = clients[client_id]
     client["last_seen"] = datetime.now(timezone.utc).isoformat()
     client["status"] = "MONITORING"
     client["incidents"] += len({event.incident_id for event in normalized})
     persist_client(client)
-    record_audit("CLIENT_EVENTS_INGESTED", client_id, {"events": len(normalized), "incidents": sorted({event.incident_id for event in normalized})})
+    record_audit("CLIENT_EVENTS_INGESTED", client_id, {"client_id": client_id, "events": len(normalized), "incidents": sorted({event.incident_id for event in normalized})})
     return IngestResponse(accepted=len(normalized), incident_ids=sorted({event.incident_id for event in normalized}))
-
-
-try:
-    from uuid import uuid4
-except ImportError:
-    uuid4 = None
