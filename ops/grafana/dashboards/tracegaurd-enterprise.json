@@ -1,0 +1,16 @@
+{
+  "title": "TraceGaurd Enterprise Operations",
+  "uid": "tracegaurd-enterprise",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "panels": [
+    {"id":1,"type":"stat","title":"Monitored Clients","gridPos":{"h":4,"w":6,"x":0,"y":0},"targets":[{"expr":"tracegaurd_monitored_clients","refId":"A"}]},
+    {"id":2,"type":"stat","title":"Active Incidents","gridPos":{"h":4,"w":6,"x":6,"y":0},"targets":[{"expr":"tracegaurd_active_incidents","refId":"A"}]},
+    {"id":3,"type":"timeseries","title":"API Request Rate","gridPos":{"h":8,"w":12,"x":0,"y":4},"targets":[{"expr":"sum(rate(tracegaurd_http_requests_total[5m]))","legendFormat":"requests/sec","refId":"A"}]},
+    {"id":4,"type":"timeseries","title":"5xx Error Rate","gridPos":{"h":8,"w":12,"x":12,"y":4},"targets":[{"expr":"sum(rate(tracegaurd_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(tracegaurd_http_requests_total[5m])),1)","legendFormat":"5xx ratio","refId":"A"}]},
+    {"id":5,"type":"timeseries","title":"P95 API Latency","gridPos":{"h":8,"w":12,"x":0,"y":12},"targets":[{"expr":"histogram_quantile(0.95,sum(rate(tracegaurd_http_request_duration_seconds_bucket[5m])) by (le))","legendFormat":"p95 seconds","refId":"A"}]},
+    {"id":6,"type":"timeseries","title":"Cache Hit Ratio","gridPos":{"h":8,"w":12,"x":12,"y":12},"targets":[{"expr":"sum(rate(tracegaurd_cache_hits_total[5m])) / clamp_min(sum(rate(tracegaurd_cache_hits_total[5m])) + sum(rate(tracegaurd_cache_misses_total[5m])),1)","legendFormat":"hit ratio","refId":"A"}]}
+  ]
+}
