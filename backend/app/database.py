@@ -151,6 +151,34 @@ class AuditRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+def _client_identity(record: ClientRecord) -> tuple[str, str, str, str]:
+    return (
+        str(record.name or "").strip().casefold(),
+        str(record.environment or "").strip().casefold(),
+        str(record.service or "").strip().casefold(),
+        str(record.website_url or "").strip().rstrip("/").casefold(),
+    )
+
+
+def _deduplicate_clients() -> None:
+    with SessionLocal() as session:
+        rows = session.query(ClientRecord).order_by(ClientRecord.created_at.asc(), ClientRecord.id.asc()).all()
+        keepers: dict[tuple[str, str, str, str], ClientRecord] = {}
+        removed = 0
+        for record in rows:
+            identity = _client_identity(record)
+            keeper = keepers.get(identity)
+            if keeper is None:
+                keepers[identity] = record
+                continue
+            session.query(IncidentRecord).filter(IncidentRecord.client_id == record.id).update({"client_id": keeper.id}, synchronize_session=False)
+            session.execute(text("UPDATE incident_events SET metadata = REPLACE(metadata, :old, :new) WHERE metadata LIKE :pattern"), {"old": record.id, "new": keeper.id, "pattern": f"%{record.id}%"})
+            session.delete(record)
+            removed += 1
+        if removed:
+            session.commit()
+
+
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
@@ -173,6 +201,9 @@ def init_db() -> None:
         for name, definition in user_additions.items():
             if name not in user_columns:
                 connection.execute(text(f"ALTER TABLE users ADD COLUMN {name} {definition}"))
+    _deduplicate_clients()
+    with engine.begin() as connection:
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_clients_identity ON clients (lower(name), lower(environment), lower(service), lower(coalesce(website_url, '')))"))
 
 
 def database_status() -> dict:
