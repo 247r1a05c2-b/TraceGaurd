@@ -1,10 +1,9 @@
 from datetime import datetime, timezone
-from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException
 
-from .database import ClientRecord, IncidentRecord, IncidentEventRecord, SessionLocal
+from .database import ClientRecord, IncidentRecord, SessionLocal
 from .main import current_engineer
 from .models import IncidentEvent, IngestResponse, Severity
 from .monitoring import check_website, clients, record_audit
@@ -17,10 +16,9 @@ def _recent_duplicate_web_incident(client_id: str, client_name: str) -> str | No
     now = datetime.now(timezone.utc)
     prefix = f"{client_name} website health check failed"
     for incident_id in store.incidents():
-        events = store.get(incident_id)
-        for event in events:
+        for event in store.get(incident_id):
             metadata = event.metadata or {}
-            if metadata.get("client_id") != client_id or event.source != "alert":
+            if metadata.get("client_id") != client_id or str(event.source) != "alert":
                 continue
             if not event.message.startswith(prefix):
                 continue
@@ -28,7 +26,7 @@ def _recent_duplicate_web_incident(client_id: str, client_name: str) -> str | No
                 event_time = event.timestamp
                 if event_time.tzinfo is None:
                     event_time = event_time.replace(tzinfo=timezone.utc)
-                if (now - event_time).total_seconds() <= 15 * 60:
+                if 0 <= (now - event_time).total_seconds() <= 15 * 60:
                     return incident_id
             except Exception:
                 continue
@@ -115,5 +113,7 @@ def install_runtime_fixes(app):
         methods = getattr(route, "methods", set())
         if route.path == "/api/v1/simulate/checkout" and "POST" in methods:
             route.endpoint = _safe_demo_checkout
+            route.dependant.call = _safe_demo_checkout
         elif route.path == "/api/v1/clients/{client_id}/check" and "POST" in methods:
             route.endpoint = _safe_client_check
+            route.dependant.call = _safe_client_check
