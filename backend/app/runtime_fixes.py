@@ -111,8 +111,7 @@ def _safe_client_check(client_id: str, engineer: str = Depends(current_engineer)
 
 def _patch_ai_fallbacks():
     try:
-        from . import graph as graph_module
-        from . import external_rag
+        from . import external_rag, graph as graph_module, rag as rag_module
 
         original_llm = graph_module._gemini_json
         original_external = external_rag.retrieve_external
@@ -147,7 +146,8 @@ def _patch_ai_fallbacks():
 
         graph_module._gemini_json = llm_with_fallback
         external_rag.retrieve_external = external_with_fallback
-        graph_module.retrieve = external_with_fallback
+        rag_module.retrieve_external = external_with_fallback
+        graph_module.retrieve = rag_module.retrieve
     except Exception:
         pass
 
