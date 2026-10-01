@@ -89,6 +89,7 @@ class IncidentEventRecord(Base):
     service: Mapped[str] = mapped_column(String(120))
     severity: Mapped[str] = mapped_column(String(30))
     message: Mapped[str] = mapped_column(Text)
+    metadata_json: Mapped[str | None] = mapped_column("metadata", Text, nullable=True)
 
 
 class AgentRunRecord(Base):
@@ -164,6 +165,9 @@ def init_db() -> None:
         for name, definition in additions.items():
             if name not in columns:
                 connection.execute(text(f"ALTER TABLE clients ADD COLUMN {name} {definition}"))
+        incident_columns = {column["name"] for column in inspect(connection).get_columns("incident_events")}
+        if "metadata" not in incident_columns:
+            connection.execute(text("ALTER TABLE incident_events ADD COLUMN metadata TEXT"))
         user_columns = {column["name"] for column in inspect(connection).get_columns("users")}
         user_additions = {"password_hash": "VARCHAR(300)", "is_active": "BOOLEAN DEFAULT TRUE", "last_login": "TIMESTAMP"}
         for name, definition in user_additions.items():
