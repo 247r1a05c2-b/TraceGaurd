@@ -46,6 +46,7 @@ class EventStore:
             return
         with self._lock:
             with SessionLocal() as session:
+                pending_incidents: set[str] = set()
                 for event in events:
                     existing = self._events[event.incident_id]
                     if not any(str(item.id) == str(event.id) for item in existing):
@@ -53,7 +54,7 @@ class EventStore:
                     metadata = event.metadata or {}
                     client_id = metadata.get("client_id")
                     incident_record = session.get(IncidentRecord, event.incident_id)
-                    if incident_record is None:
+                    if incident_record is None and event.incident_id not in pending_incidents:
                         session.add(IncidentRecord(
                             id=event.incident_id,
                             client_id=client_id,
@@ -61,7 +62,8 @@ class EventStore:
                             severity=event.severity.value,
                             status="OPEN",
                         ))
-                    elif client_id and not incident_record.client_id:
+                        pending_incidents.add(event.incident_id)
+                    elif incident_record is not None and client_id and not incident_record.client_id:
                         incident_record.client_id = client_id
                     session.add(IncidentEventRecord(
                         incident_id=event.incident_id,
