@@ -1,0 +1,11 @@
+apiVersion: 1
+
+providers:
+  - name: TraceGaurd
+    orgId: 1
+    folder: TraceGaurd
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
