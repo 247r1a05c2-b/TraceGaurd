@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node apply-hackathon-ui.mjs && node client-score-patch.mjs && tsc --noEmit && vite build",
+    "build": "node apply-hackathon-ui.mjs && node client-score-patch.mjs && node audit-ui-patch.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
