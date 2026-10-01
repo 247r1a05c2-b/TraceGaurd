@@ -15,6 +15,7 @@ from app.client_routes import install_client_routes
 from app.database import ApprovalRecord, SessionLocal
 from app.monitoring import record_audit
 from app.security import verify_token
+from app.runtime_fixes import install_runtime_fixes
 
 
 @app.exception_handler(IntegrityError)
@@ -46,5 +47,6 @@ async def handle_database_integrity_error(request: Request, exc: IntegrityError)
 
 
 install_client_routes(app)
+install_runtime_fixes(app)
 
 __all__ = ["app"]
