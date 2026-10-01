@@ -5,6 +5,9 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 from time import perf_counter
+import json
+
+from .database import AuditRecord, SessionLocal
 
 clients: dict[str, dict[str, Any]] = {}
 audit_log: list[dict[str, Any]] = []
@@ -89,7 +92,53 @@ def check_website(client_id: str) -> dict[str, Any]:
 
 
 def record_audit(event: str, actor: str, details: dict[str, Any]) -> None:
-    audit_log.append({"timestamp": datetime.now(timezone.utc).isoformat(), "event": event, "actor": actor, "details": details})
+    record = {"timestamp": datetime.now(timezone.utc).isoformat(), "event": event, "actor": actor, "details": details}
+    audit_log.append(record)
+    try:
+        with SessionLocal() as session:
+            session.add(AuditRecord(event=event, actor=actor, details=json.dumps(details, default=str)))
+            session.commit()
+    except Exception:
+        pass
+
+
+def _client_event_matches(event: Any, client: dict[str, Any]) -> bool:
+    metadata = getattr(event, "metadata", {}) or {}
+    if metadata.get("client_id") == client["client_id"]:
+        return True
+    return str(getattr(event, "service", "")).lower() == str(client.get("service", "")).lower()
+
+
+def calculate_client_score(client: dict[str, Any], events: list[Any], audits: list[dict[str, Any]]) -> dict[str, Any]:
+    scoped = [event for event in events if _client_event_matches(event, client)]
+    log_events = [event for event in scoped if getattr(event.source, "value", event.source) == "log"]
+    deployment_events = [event for event in scoped if getattr(event.source, "value", event.source) == "deployment"]
+    critical_logs = sum(1 for event in log_events if getattr(event.severity, "value", event.severity) == "critical")
+    warning_logs = sum(1 for event in log_events if getattr(event.severity, "value", event.severity) == "warning")
+    token_count = 0
+    for event in scoped:
+        metadata = getattr(event, "metadata", {}) or {}
+        token_count += int(metadata.get("tokens") or max(1, round(len(str(getattr(event, "message", ""))) / 4)))
+    client_audits = [item for item in audits if item.get("actor") == client["client_id"] or item.get("details", {}).get("client_id") == client["client_id"] or item.get("details", {}).get("clientId") == client["client_id"]]
+    log_score = max(0, 85 - critical_logs * 12 - warning_logs * 4)
+    deployment_score = max(0, 85 - max(0, len(deployment_events) - 1) * 6)
+    audit_score = min(85, 45 + len(client_audits) * 5)
+    token_score = max(0, 85 - max(0, token_count - 400) // 100 * 4)
+    status_penalty = 20 if client.get("status") == "DOWN" else 10 if client.get("status") == "DEGRADED" else 0
+    overall = max(0, min(85, round(log_score * 0.35 + deployment_score * 0.25 + audit_score * 0.15 + token_score * 0.25 - status_penalty)))
+    return {
+        "score": overall,
+        "max_score": 85,
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
+        "components": {
+            "logs": {"events": len(log_events), "critical": critical_logs, "warning": warning_logs, "score": log_score},
+            "deployments": {"events": len(deployment_events), "score": deployment_score},
+            "audits": {"events": len(client_audits), "score": audit_score},
+            "tokens": {"estimated": token_count, "score": token_score},
+        },
+        "status_penalty": status_penalty,
+        "method": "Client-scoped weighted operational score; recalculated on every request and capped at 85.",
+    }
 
 
 def execute_approved_action(incident_id: str, action: str, actor: str) -> dict[str, Any]:
