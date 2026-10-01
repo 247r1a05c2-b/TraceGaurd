@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: tracegaurd
+      POSTGRES_USER: tracegaurd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tracegaurd-dev-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracegaurd -d tracegaurd"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+psycopg://tracegaurd:${POSTGRES_PASSWORD:-tracegaurd-dev-password}@postgres:5432/tracegaurd
+      REDIS_URL: redis://redis:6379/0
+      WEB_CONCURRENCY: 2
+      RATE_LIMIT_PER_MINUTE: 240
+      DEMO_ENGINEER_EMAIL: ${DEMO_ENGINEER_EMAIL:-engineer@tracegaurd.ai}
+      DEMO_ENGINEER_PASSWORD: ${DEMO_ENGINEER_PASSWORD:-TraceGaurd@123}
+      TRACEGAURD_SECRET: ${TRACEGAURD_SECRET:-change-me-in-production}
+      TRACEGAURD_CLIENT_INGEST_SECRET: ${TRACEGAURD_CLIENT_INGEST_SECRET:-change-me-in-production}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-change-me}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data:
