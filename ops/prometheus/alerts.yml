@@ -2,7 +2,7 @@ groups:
   - name: tracegaurd-enterprise
     rules:
       - alert: TraceGaurdHighErrorRate
-        expr: sum(rate(tracegaurd_http_request_duration_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(tracegaurd_http_request_duration_seconds_count[5m])), 1) > 0.05
+        expr: sum(rate(tracegaurd_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(tracegaurd_http_requests_total[5m])), 1) > 0.05
         for: 5m
         labels:
           severity: critical
@@ -25,10 +25,10 @@ groups:
         annotations:
           summary: TraceGaurd has no monitored clients configured
 
-      - alert: TraceGaurdCacheDegraded
-        expr: tracegaurd_cache_misses_total > 0 and tracegaurd_cache_hits_total == 0
+      - alert: TraceGaurdCacheMissPressure
+        expr: rate(tracegaurd_cache_misses_total[10m]) > 5 * rate(tracegaurd_cache_hits_total[10m])
         for: 15m
         labels:
           severity: warning
         annotations:
-          summary: TraceGaurd cache has no observed hits
+          summary: TraceGaurd cache miss rate is significantly above hit rate
