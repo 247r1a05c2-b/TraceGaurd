@@ -1,0 +1,34 @@
+groups:
+  - name: tracegaurd-enterprise
+    rules:
+      - alert: TraceGaurdHighErrorRate
+        expr: sum(rate(tracegaurd_http_request_duration_seconds_count{status=~"5.."}[5m])) / clamp_min(sum(rate(tracegaurd_http_request_duration_seconds_count[5m])), 1) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: TraceGaurd API error rate is above 5%
+
+      - alert: TraceGaurdHighLatency
+        expr: histogram_quantile(0.95, sum(rate(tracegaurd_http_request_duration_seconds_bucket[5m])) by (le)) > 1.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: TraceGaurd p95 API latency is above 1.5 seconds
+
+      - alert: TraceGaurdNoActiveClients
+        expr: tracegaurd_monitored_clients == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: TraceGaurd has no monitored clients configured
+
+      - alert: TraceGaurdCacheDegraded
+        expr: tracegaurd_cache_misses_total > 0 and tracegaurd_cache_hits_total == 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: TraceGaurd cache has no observed hits
