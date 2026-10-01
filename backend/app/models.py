@@ -32,6 +32,7 @@ class IncidentEvent(BaseModel):
 
 class IncidentSummary(BaseModel):
     incident_id: str
+    client_id: str | None = None
     title: str
     status: str
     severity: Severity
