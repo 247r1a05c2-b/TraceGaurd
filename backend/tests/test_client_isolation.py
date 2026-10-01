@@ -35,7 +35,7 @@ def test_duplicate_client_registration_is_rejected():
 def test_client_incidents_and_scores_are_isolated():
     headers = auth_headers()
     suffix = uuid.uuid4().hex[:8]
-    clients = []
+    created_clients = []
     for name in (f"Isolation A {suffix}", f"Isolation B {suffix}"):
         response = client.post(
             "/api/v1/clients",
@@ -49,28 +49,37 @@ def test_client_incidents_and_scores_are_isolated():
             },
         )
         assert response.status_code == 200
-        clients.append(response.json())
+        created_clients.append(response.json())
 
     listing = client.get("/api/v1/clients", headers=headers)
     assert listing.status_code == 200
     ids = [item["client_id"] for item in listing.json()]
     assert len(ids) == len(set(ids))
-    assert sum(item["name"] == clients[0]["name"] for item in listing.json()) == 1
-    assert sum(item["name"] == clients[1]["name"] for item in listing.json()) == 1
+    assert sum(item["name"] == created_clients[0]["name"] for item in listing.json()) == 1
+    assert sum(item["name"] == created_clients[1]["name"] for item in listing.json()) == 1
 
     incident_ids = []
-    for item in clients:
+    for item in created_clients:
         response = client.post(f"/api/v1/clients/{item['client_id']}/simulate-incident", headers=headers)
         assert response.status_code == 200
         incident_ids.append(response.json()["incident_ids"][0])
 
     incidents = client.get("/api/v1/incidents", headers=headers).json()
-    scoped = {item["client_id"]: {item["incident_id"] for item in incidents if item["client_id"] == item["client_id"]} for item in clients}
+    scoped = {
+        client_item["client_id"]: {
+            incident["incident_id"]
+            for incident in incidents
+            if incident["client_id"] == client_item["client_id"]
+        }
+        for client_item in created_clients
+    }
     assert incident_ids[0] != incident_ids[1]
-    assert incident_ids[0] in scoped[clients[0]["client_id"]]
-    assert incident_ids[1] in scoped[clients[1]["client_id"]]
+    assert incident_ids[0] in scoped[created_clients[0]["client_id"]]
+    assert incident_ids[1] in scoped[created_clients[1]["client_id"]]
+    assert incident_ids[1] not in scoped[created_clients[0]["client_id"]]
+    assert incident_ids[0] not in scoped[created_clients[1]["client_id"]]
 
-    for item in clients:
+    for item in created_clients:
         score = client.get(f"/api/v1/clients/{item['client_id']}/score", headers=headers)
         assert score.status_code == 200
         body = score.json()
