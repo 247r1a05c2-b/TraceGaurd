@@ -60,7 +60,7 @@ def register_client(name: str, environment: str, service: str, website_url: str 
 
 def hydrate_clients(records: list[dict[str, Any]]) -> None:
     for record in records:
-        clients[record["id"]] = {
+        hydrated = {
             "client_id": record["id"],
             "name": record["name"],
             "environment": record["environment"],
@@ -73,6 +73,15 @@ def hydrate_clients(records: list[dict[str, Any]]) -> None:
             "last_http_status": record.get("last_http_status"),
             "incidents": int(record.get("incidents") or 0),
         }
+        identity = _identity(hydrated["name"], hydrated["environment"], hydrated["service"], hydrated.get("website_url"))
+        duplicate_ids = [
+            client_id for client_id, item in clients.items()
+            if _identity(str(item.get("name", "")), str(item.get("environment", "")), str(item.get("service", "")), item.get("website_url")) == identity
+            and client_id != hydrated["client_id"]
+        ]
+        for duplicate_id in duplicate_ids:
+            clients.pop(duplicate_id, None)
+        clients[hydrated["client_id"]] = hydrated
 
 
 def heartbeat(client_id: str) -> dict[str, Any]:
