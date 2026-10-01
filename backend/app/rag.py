@@ -2,6 +2,8 @@ import math
 import re
 from typing import Any
 
+from .external_rag import retrieve_external
+
 RUNBOOKS = [
     {"id":"RB-001","type":"runbook","title":"Checkout 5xx runbook","content":"Check recent deployments, error-rate spikes, application logs, request traces, and dependency health before considering rollback.","tags":["checkout","500","deployment","rollback"]},
     {"id":"RB-002","type":"runbook","title":"Database pool runbook","content":"Inspect connection-pool saturation, connection acquisition latency, timeout rate, database health, and recent schema or configuration changes.","tags":["database","timeout","pool","saturation"]},
@@ -60,4 +62,6 @@ def retrieve(query: str, top_k: int = 4) -> list[dict[str, Any]]:
     documents = [f"{item['title']} {item['content']} {' '.join(item['tags'])}" for item in KNOWLEDGE_BASE]
     scores = _tfidf_scores(query, documents)
     ranked = sorted(zip(scores, KNOWLEDGE_BASE), key=lambda pair: pair[0], reverse=True)
-    return [{**item, "score": round(float(score), 4), "retrieval_mode": "tfidf_vector"} for score, item in ranked[:top_k]]
+    local = [{**item, "score": round(float(score), 4), "retrieval_mode": "local_tfidf"} for score, item in ranked[:top_k]]
+    external = retrieve_external(query, top_k=2)
+    return external + local
