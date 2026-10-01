@@ -1,5 +1,6 @@
 from collections import defaultdict
 from threading import Lock
+import json
 
 from .database import IncidentEventRecord, IncidentRecord, SessionLocal
 from .models import IncidentEvent
@@ -13,6 +14,12 @@ class EventStore:
 
     @staticmethod
     def _row_to_event(row: IncidentEventRecord) -> IncidentEvent:
+        metadata = {}
+        if row.metadata_json:
+            try:
+                metadata = json.loads(row.metadata_json)
+            except Exception:
+                metadata = {}
         return IncidentEvent.model_validate({
             "incident_id": row.incident_id,
             "timestamp": row.timestamp,
@@ -20,6 +27,7 @@ class EventStore:
             "service": row.service,
             "severity": row.severity,
             "message": row.message,
+            "metadata": metadata,
         })
 
     def _load_from_db(self) -> None:
@@ -41,6 +49,20 @@ class EventStore:
                     existing = self._events[event.incident_id]
                     if not any(str(item.id) == str(event.id) for item in existing):
                         existing.append(event)
+                    metadata = event.metadata or {}
+                    client_id = metadata.get("client_id")
+                    incident_record = session.get(IncidentRecord, event.incident_id)
+                    if incident_record is None:
+                        session.add(IncidentRecord(
+                            id=event.incident_id,
+                            client_id=client_id,
+                            title=f"{metadata.get('client_name') or event.service} incident",
+                            severity=event.severity.value,
+                            status="OPEN",
+                        ))
+                        pending_incidents.add(event.incident_id)
+                    elif client_id and not incident_record.client_id:
+                        incident_record.client_id = client_id
                     session.add(IncidentEventRecord(
                         incident_id=event.incident_id,
                         timestamp=str(event.timestamp),
@@ -48,15 +70,8 @@ class EventStore:
                         service=event.service,
                         severity=event.severity.value,
                         message=event.message,
+                        metadata_json=json.dumps(metadata),
                     ))
-                    if event.incident_id not in pending_incidents and session.get(IncidentRecord, event.incident_id) is None:
-                        session.add(IncidentRecord(
-                            id=event.incident_id,
-                            title=f"Incident {event.incident_id}",
-                            severity=event.severity.value,
-                            status="OPEN",
-                        ))
-                        pending_incidents.add(event.incident_id)
                 session.commit()
 
     def get(self, incident_id: str) -> list[IncidentEvent]:
@@ -82,6 +97,11 @@ class EventStore:
         for incident_id in ids:
             self.get(incident_id)
         return ids
+
+    def incident_client_id(self, incident_id: str) -> str | None:
+        with SessionLocal() as session:
+            row = session.get(IncidentRecord, incident_id)
+            return row.client_id if row else None
 
 
 store = EventStore()
