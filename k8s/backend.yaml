@@ -4,7 +4,7 @@ metadata:
   name: tracegaurd-secrets
   namespace: tracegaurd
 stringData:
-  POSTGRES_PASSWORD: change-me
+  DATABASE_URL: postgresql+psycopg://tracegaurd:change-me@postgres:5432/tracegaurd
   TRACEGAURD_SECRET: replace-with-64-plus-random-characters
   TRACEGAURD_CLIENT_INGEST_SECRET: replace-with-a-client-secret
   DEMO_ENGINEER_PASSWORD: replace-this-password
@@ -18,7 +18,6 @@ data:
   DEMO_ENGINEER_EMAIL: engineer@tracegaurd.ai
   RATE_LIMIT_PER_MINUTE: "240"
   WEB_CONCURRENCY: "2"
-  DATABASE_URL: postgresql+psycopg://tracegaurd:$(POSTGRES_PASSWORD)@postgres:5432/tracegaurd
   REDIS_URL: redis://redis:6379/0
 ---
 apiVersion: apps/v1
@@ -52,7 +51,7 @@ spec:
       containers:
         - name: api
           image: ghcr.io/247r1a05c2-b/tracegaurd-api:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8000
@@ -61,9 +60,6 @@ spec:
                 name: tracegaurd-config
             - secretRef:
                 name: tracegaurd-secrets
-          env:
-            - name: DATABASE_URL
-              value: postgresql+psycopg://tracegaurd:change-me@postgres:5432/tracegaurd
           resources:
             requests:
               cpu: 250m
