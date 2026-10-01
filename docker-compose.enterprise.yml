@@ -45,8 +45,15 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    depends_on:
+      - api
     ports:
-      - "8000:8000"
+      - "8080:80"
 
   prometheus:
     image: prom/prometheus:v3.5.0
@@ -56,6 +63,7 @@ services:
       - --storage.tsdb.retention.time=15d
     volumes:
       - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     depends_on:
       - api
