@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tracegaurd
+  labels:
+    app.kubernetes.io/name: tracegaurd
+    app.kubernetes.io/part-of: tracegaurd-enterprise
