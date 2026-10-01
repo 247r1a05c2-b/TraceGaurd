@@ -1,0 +1,163 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tracegaurd-secrets
+  namespace: tracegaurd
+stringData:
+  POSTGRES_PASSWORD: change-me
+  TRACEGAURD_SECRET: replace-with-64-plus-random-characters
+  TRACEGAURD_CLIENT_INGEST_SECRET: replace-with-a-client-secret
+  DEMO_ENGINEER_PASSWORD: replace-this-password
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tracegaurd-config
+  namespace: tracegaurd
+data:
+  DEMO_ENGINEER_EMAIL: engineer@tracegaurd.ai
+  RATE_LIMIT_PER_MINUTE: "240"
+  WEB_CONCURRENCY: "2"
+  DATABASE_URL: postgresql+psycopg://tracegaurd:$(POSTGRES_PASSWORD)@postgres:5432/tracegaurd
+  REDIS_URL: redis://redis:6379/0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tracegaurd-api
+  namespace: tracegaurd
+  labels:
+    app: tracegaurd-api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: tracegaurd-api
+  template:
+    metadata:
+      labels:
+        app: tracegaurd-api
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: ghcr.io/247r1a05c2-b/tracegaurd-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: tracegaurd-config
+            - secretRef:
+                name: tracegaurd-secrets
+          env:
+            - name: DATABASE_URL
+              value: postgresql+psycopg://tracegaurd:change-me@postgres:5432/tracegaurd
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tracegaurd-api
+  namespace: tracegaurd
+spec:
+  selector:
+    app: tracegaurd-api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+  type: ClusterIP
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: tracegaurd-api
+  namespace: tracegaurd
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: tracegaurd-api
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: tracegaurd-api
+  namespace: tracegaurd
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: tracegaurd-api
+  minReplicas: 3
+  maxReplicas: 10
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Percent
+          value: 100
+          periodSeconds: 60
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+        - type: Percent
+          value: 25
+          periodSeconds: 60
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 65
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
