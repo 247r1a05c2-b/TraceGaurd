@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 from uuid import uuid4
 
@@ -108,7 +109,51 @@ def _safe_client_check(client_id: str, engineer: str = Depends(current_engineer)
     return result
 
 
+def _patch_ai_fallbacks():
+    try:
+        from . import graph as graph_module
+        from . import external_rag
+
+        original_llm = graph_module._gemini_json
+        original_external = external_rag.retrieve_external
+
+        def llm_with_fallback(prompt):
+            result = original_llm(prompt)
+            if result is not None:
+                return result
+            old = os.getenv("GEMINI_MODEL")
+            os.environ["GEMINI_MODEL"] = "gemini-flash-latest"
+            try:
+                return original_llm(prompt)
+            finally:
+                if old is None:
+                    os.environ.pop("GEMINI_MODEL", None)
+                else:
+                    os.environ["GEMINI_MODEL"] = old
+
+        def external_with_fallback(query, top_k=4):
+            result = original_external(query, top_k=top_k)
+            if result:
+                return result
+            old = os.getenv("GEMINI_MODEL")
+            os.environ["GEMINI_MODEL"] = "gemini-flash-latest"
+            try:
+                return original_external(query, top_k=top_k)
+            finally:
+                if old is None:
+                    os.environ.pop("GEMINI_MODEL", None)
+                else:
+                    os.environ["GEMINI_MODEL"] = old
+
+        graph_module._gemini_json = llm_with_fallback
+        external_rag.retrieve_external = external_with_fallback
+        graph_module.retrieve = external_with_fallback
+    except Exception:
+        pass
+
+
 def install_runtime_fixes(app):
+    _patch_ai_fallbacks()
     for route in app.routes:
         methods = getattr(route, "methods", set())
         if route.path == "/api/v1/simulate/checkout" and "POST" in methods:
