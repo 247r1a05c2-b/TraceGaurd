@@ -1,11 +1,11 @@
 {
   "name": "tracegaurd-dashboard",
   "private": true,
-  "version": "2.0.0",
+  "version": "2.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node patch-client-ui.mjs && node fix-client-view.mjs && tsc --noEmit && vite build",
+    "build": "node apply-hackathon-ui.mjs && tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview"
   },
