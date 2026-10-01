@@ -47,6 +47,7 @@ class EventStore:
         with self._lock:
             with SessionLocal() as session:
                 pending_incidents: set[str] = set()
+                pending_event_keys: set[tuple[str, str, str]] = set()
                 for event in events:
                     existing = self._events[event.incident_id]
                     if not any(str(item.id) == str(event.id) for item in existing):
@@ -63,8 +64,13 @@ class EventStore:
                             status="OPEN",
                         ))
                         pending_incidents.add(event.incident_id)
+                        session.flush()
                     elif incident_record is not None and client_id and not incident_record.client_id:
                         incident_record.client_id = client_id
+                    event_key = (event.incident_id, str(event.timestamp), event.message)
+                    if event_key in pending_event_keys:
+                        continue
+                    pending_event_keys.add(event_key)
                     session.add(IncidentEventRecord(
                         incident_id=event.incident_id,
                         timestamp=str(event.timestamp),
@@ -93,12 +99,7 @@ class EventStore:
             return events
 
     def incidents(self) -> list[str]:
-        """Return incident IDs with short-window duplicates collapsed per client.
-
-        Monitoring can receive the same outage signal repeatedly while a service is
-        still down. The newest incident is retained for the UI/RCA queue while older
-        duplicate records remain auditable in the database.
-        """
+        """Return incident IDs with short-window duplicates collapsed per client."""
         with SessionLocal() as session:
             rows = session.query(
                 IncidentRecord.id,
