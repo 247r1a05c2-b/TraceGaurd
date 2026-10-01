@@ -185,3 +185,123 @@ html[data-theme='dark'] .login-form input:focus {
     animation-duration: .01ms !important;
   }
 }
+
+/* Overview AI network animation: visual-only, no workflow changes. */
+.hero-card .architecture {
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.hero-card .architecture::before {
+  content: "";
+  position: absolute;
+  inset: 8%;
+  z-index: 0;
+  pointer-events: none;
+  opacity: .78;
+  background:
+    linear-gradient(24deg, transparent 49.35%, rgba(88,230,223,.22) 49.55%, rgba(88,230,223,.72) 49.85%, rgba(88,230,223,.22) 50.15%, transparent 50.45%),
+    linear-gradient(156deg, transparent 49.35%, rgba(88,230,223,.18) 49.55%, rgba(88,230,223,.68) 49.85%, rgba(88,230,223,.18) 50.15%, transparent 50.45%),
+    linear-gradient(74deg, transparent 49.45%, rgba(105,214,177,.16) 49.65%, rgba(105,214,177,.55) 49.9%, rgba(105,214,177,.16) 50.15%, transparent 50.35%),
+    linear-gradient(106deg, transparent 49.45%, rgba(105,214,177,.16) 49.65%, rgba(105,214,177,.55) 49.9%, rgba(105,214,177,.16) 50.15%, transparent 50.35%);
+  mask-image: radial-gradient(circle at 50% 50%, #000 0 45%, transparent 78%);
+  animation: tg-network-drift 5s linear infinite;
+}
+
+.hero-card .architecture::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 190px;
+  height: 190px;
+  z-index: 0;
+  pointer-events: none;
+  transform: translate(-50%,-50%);
+  border: 1px solid rgba(88,230,223,.18);
+  border-radius: 50%;
+  box-shadow: 0 0 32px rgba(88,230,223,.10), inset 0 0 28px rgba(88,230,223,.05);
+  animation: tg-core-pulse 2.8s ease-in-out infinite;
+}
+
+.hero-card .arch-center,
+.hero-card .arch-node {
+  z-index: 2;
+}
+
+.hero-card .arch-center {
+  box-shadow: 0 0 0 1px rgba(88,230,223,.22), 0 0 35px rgba(88,230,223,.16);
+  animation: tg-core-breathe 2.8s ease-in-out infinite;
+}
+
+.hero-card .arch-node {
+  box-shadow: 0 0 0 1px rgba(88,230,223,.10), 0 8px 24px rgba(0,0,0,.06);
+  animation: tg-node-float 3.6s ease-in-out infinite;
+}
+
+.hero-card .arch-node:nth-of-type(3n) { animation-delay: -.8s; }
+.hero-card .arch-node:nth-of-type(4n) { animation-delay: -1.6s; }
+.hero-card .arch-node:nth-of-type(5n) { animation-delay: -2.4s; }
+
+.hero-card .arch-node span {
+  position: relative;
+}
+
+.hero-card .arch-node span::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  right: -11px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: #58e6df;
+  box-shadow: 0 0 10px rgba(88,230,223,.9);
+  animation: tg-signal 1.7s ease-in-out infinite;
+}
+
+html[data-theme='light'] .hero-card .architecture::before {
+  opacity: .58;
+  background:
+    linear-gradient(24deg, transparent 49.35%, rgba(8,127,131,.18) 49.55%, rgba(8,127,131,.62) 49.85%, rgba(8,127,131,.18) 50.15%, transparent 50.45%),
+    linear-gradient(156deg, transparent 49.35%, rgba(8,127,131,.14) 49.55%, rgba(8,127,131,.52) 49.85%, rgba(8,127,131,.14) 50.15%, transparent 50.45%),
+    linear-gradient(74deg, transparent 49.45%, rgba(8,127,131,.12) 49.65%, rgba(8,127,131,.42) 49.9%, rgba(8,127,131,.12) 50.15%, transparent 50.35%),
+    linear-gradient(106deg, transparent 49.45%, rgba(8,127,131,.12) 49.65%, rgba(8,127,131,.42) 49.9%, rgba(8,127,131,.12) 50.15%, transparent 50.35%);
+}
+
+@keyframes tg-network-drift {
+  0% { transform: scale(1) rotate(0deg); filter: brightness(.9); }
+  50% { transform: scale(1.025) rotate(.7deg); filter: brightness(1.15); }
+  100% { transform: scale(1) rotate(0deg); filter: brightness(.9); }
+}
+
+@keyframes tg-core-pulse {
+  0%,100% { opacity: .42; transform: translate(-50%,-50%) scale(.86); }
+  50% { opacity: .95; transform: translate(-50%,-50%) scale(1.08); }
+}
+
+@keyframes tg-core-breathe {
+  0%,100% { transform: scale(1); }
+  50% { transform: scale(1.045); }
+}
+
+@keyframes tg-node-float {
+  0%,100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+
+@keyframes tg-signal {
+  0%,100% { opacity: .45; transform: translateY(-50%) scale(.75); }
+  50% { opacity: 1; transform: translateY(-50%) scale(1.35); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-card .architecture::before,
+  .hero-card .architecture::after,
+  .hero-card .arch-center,
+  .hero-card .arch-node,
+  .hero-card .arch-node span::after {
+    animation: none !important;
+  }
+}
