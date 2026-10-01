@@ -12,22 +12,14 @@ if (!main.includes('client-score-panel')) {
   const simulation = "const simulateIncident=async(id:string)=>{setSimulating(id);setMsg('');setError('');try{const r=await api<any>('/api/v1/clients/'+id+'/simulate-incident',{method:'POST'},token);await onChanged();const incidentId=r.incident_ids?.[0];if(incidentId)onIncident(incidentId);else setMsg('Client incident created.')}catch(x){setError((x as Error).message)}finally{setSimulating(null)}};\n "
   if (main.includes(marker) && !main.includes('const simulateIncident=')) main = main.replace(marker, simulation + marker)
 
-  main = main.replace(
-    'clients.map(c=><article className="inventory-item" key={c.client_id}>',
-    'clients.map(c=>{const performance=(c as any).performance||{};const score=Number((c as any).score??performance.score??0);return <article className="inventory-item" key={c.client_id}>'
-  )
-  main = main.replace(
-    '</div><div className="inventory-actions"><button className="ghost small" disabled={!c.website_url||checking===c.client_id}',
-    '</div><div className="client-score-panel"><div><span>CLIENT PERFORMANCE</span><strong>{score}/85</strong></div><div className="score-track"><i style={{width:Math.min(100,Math.round((score/85)*100))+\'%\'}}/></div><small>Logs {performance.components?.logs?.events??0} · Deployments {performance.components?.deployments?.events??0} · Audits {performance.components?.audits?.events??0} · Tokens {performance.components?.tokens?.estimated??0}</small></div><div className="inventory-actions"><button className="ghost small" disabled={!c.website_url||checking===c.client_id}'
-  )
-  main = main.replace(
-    '<button className="danger small" onClick={()=>setRemoving(c)}>Remove Client</button>',
-    '<button className="ghost small" disabled={simulating===c.client_id} onClick={()=>simulateIncident(c.client_id)}>{simulating===c.client_id?\'Creating incident…\':\'Simulate client incident\'}</button><button className="danger small" onClick={()=>setRemoving(c)}>Remove Client</button>'
-  )
-  main = main.replace(
-    '</article>})}{!clients.length',
-    '</article>})}{!clients.length'
-  )
+  const statusMarker = '<div className="inventory-status"><span className={c.status===\'DOWN\'?\'online-badge down-text\':\'online-badge\'}><i/> {c.status}</span><strong>{c.last_response_ms ? c.last_response_ms+\' ms\' : \'—\'}</strong></div>'
+  const scorePanel = statusMarker + '<div className="client-score-panel"><div><span>CLIENT PERFORMANCE</span><strong>{(c as any).score??0}/85</strong></div><div className="score-track"><i style={{width:Math.min(100,Math.round((((c as any).score??0)/85)*100))+\'%\'}}/></div><small>Logs {(c as any).performance?.components?.logs?.events??0} · Deployments {(c as any).performance?.components?.deployments?.events??0} · Audits {(c as any).performance?.components?.audits?.events??0} · Tokens {(c as any).performance?.components?.tokens?.estimated??0}</small></div>'
+  if (main.includes(statusMarker)) main = main.replace(statusMarker, scorePanel)
+
+  const removeButton = '<button className="danger small" onClick={()=>setRemoving(c)}>Remove Client</button>'
+  const simulateButton = '<button className="ghost small" disabled={simulating===c.client_id} onClick={()=>simulateIncident(c.client_id)}>{simulating===c.client_id?\'Creating incident…\':\'Simulate client incident\'}</button>' + removeButton
+  if (main.includes(removeButton) && !main.includes('Simulate client incident')) main = main.replace(removeButton, simulateButton)
+
   fs.writeFileSync(path, main)
 }
 
