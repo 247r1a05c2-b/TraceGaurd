@@ -19,7 +19,8 @@ def _recent_duplicate_web_incident(client_id: str, client_name: str) -> str | No
     for incident_id in store.incidents():
         for event in store.get(incident_id):
             metadata = event.metadata or {}
-            if metadata.get("client_id") != client_id or str(event.source) != "alert":
+            source = getattr(event.source, "value", event.source)
+            if metadata.get("client_id") != client_id or source != "alert":
                 continue
             if not event.message.startswith(prefix):
                 continue
