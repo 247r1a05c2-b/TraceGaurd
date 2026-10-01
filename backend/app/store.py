@@ -83,20 +83,26 @@ class EventStore:
                 session.commit()
 
     def get(self, incident_id: str) -> list[IncidentEvent]:
-        cached = self._events.get(incident_id, [])
-        if cached:
-            return sorted(cached, key=lambda event: event.timestamp)
-        with SessionLocal() as session:
-            rows = session.query(IncidentEventRecord).filter(IncidentEventRecord.incident_id == incident_id).order_by(IncidentEventRecord.timestamp).all()
-            events: list[IncidentEvent] = []
-            for row in rows:
-                try:
-                    events.append(self._row_to_event(row))
-                except Exception:
-                    continue
-            if events:
-                self._events[incident_id] = events
-            return events
+        # PostgreSQL is the source of truth so horizontally scaled replicas never serve
+        # permanently stale incident state from a process-local memory cache.
+        try:
+            with SessionLocal() as session:
+                rows = session.query(IncidentEventRecord).filter(
+                    IncidentEventRecord.incident_id == incident_id
+                ).order_by(IncidentEventRecord.timestamp).all()
+                events: list[IncidentEvent] = []
+                for row in rows:
+                    try:
+                        events.append(self._row_to_event(row))
+                    except Exception:
+                        continue
+                if events:
+                    self._events[incident_id] = events
+                return events
+        except Exception:
+            # Availability fallback: if the database briefly fails, serve the last
+            # process-local copy rather than crashing the incident dashboard.
+            return sorted(self._events.get(incident_id, []), key=lambda event: event.timestamp)
 
     def incidents(self) -> list[str]:
         """Return incident IDs with short-window duplicates collapsed per client."""
