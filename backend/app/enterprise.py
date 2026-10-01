@@ -22,6 +22,7 @@ from .database import database_status
 from .monitoring import clients
 from .store import store
 
+REQUESTS = Counter("tracegaurd_http_requests_total", "HTTP requests", ["method", "path", "status"])
 REQUEST_LATENCY = Histogram("tracegaurd_http_request_duration_seconds", "HTTP request duration", ["method", "path"])
 ACTIVE_REQUESTS = Gauge("tracegaurd_http_active_requests", "Requests currently in flight")
 CACHE_HITS = Counter("tracegaurd_cache_hits_total", "Cache hits", ["namespace"])
@@ -36,12 +37,7 @@ class EnterpriseCache:
         self.redis_client = None
         if self.redis_url and redis is not None:
             try:
-                self.redis_client = redis.from_url(
-                    self.redis_url,
-                    decode_responses=True,
-                    socket_connect_timeout=0.5,
-                    socket_timeout=0.5,
-                )
+                self.redis_client = redis.from_url(self.redis_url, decode_responses=True, socket_connect_timeout=0.5, socket_timeout=0.5)
                 self.redis_client.ping()
             except Exception:
                 self.redis_client = None
@@ -107,13 +103,7 @@ class EnterpriseCache:
             except Exception:
                 redis_ok = False
         total = self._hits + self._misses
-        return {
-            "backend": "redis" if redis_ok else "memory",
-            "distributed": redis_ok,
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_ratio": round(self._hits / max(1, total), 4),
-        }
+        return {"backend": "redis" if redis_ok else "memory", "distributed": redis_ok, "hits": self._hits, "misses": self._misses, "hit_ratio": round(self._hits / max(1, total), 4)}
 
 
 cache = EnterpriseCache()
@@ -198,11 +188,14 @@ def install_enterprise(app) -> None:
         if path not in {"/health", "/health/live", "/health/ready", "/metrics"}:
             client_ip = request.headers.get("x-forwarded-for", request.client.host if request.client else "unknown").split(",")[0].strip()
             if not rate_limiter.allow(client_ip):
+                REQUESTS.labels(method=request.method, path=path, status="429").inc()
                 return PlainTextResponse("rate limit exceeded", status_code=429, headers={"Retry-After": "60"})
         request_id = request.headers.get("x-request-id") or uuid4().hex
         ACTIVE_REQUESTS.inc()
+        status_code = 500
         try:
             response = await call_next(request)
+            status_code = response.status_code
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
@@ -211,6 +204,7 @@ def install_enterprise(app) -> None:
             return response
         finally:
             ACTIVE_REQUESTS.dec()
+            REQUESTS.labels(method=request.method, path=path, status=str(status_code)).inc()
             REQUEST_LATENCY.labels(method=request.method, path=path).observe(time.perf_counter() - started)
 
     @app.get("/health/live", include_in_schema=False)
