@@ -7,8 +7,10 @@ import time
 from datetime import datetime, timedelta, timezone
 
 DEMO_EMAIL = os.getenv("DEMO_ENGINEER_EMAIL", "engineer@tracegaurd.ai").strip().lower()
-DEMO_PASSWORD = os.getenv("DEMO_ENGINEER_PASSWORD", "").strip()
-_SECRET = os.getenv("TRACEGAURD_SECRET", "").encode()
+DEMO_PASSWORD = os.getenv("DEMO_ENGINEER_PASSWORD", "TraceGaurd@123").strip()
+# A development fallback keeps the hackathon demo runnable without an extra setup step.
+# Set TRACEGAURD_SECRET in Vercel/production to a long random secret.
+_SECRET = os.getenv("TRACEGAURD_SECRET", "tracegaurd-hackathon-demo-secret-change-in-production").encode()
 SESSION_HOURS = int(os.getenv("SESSION_HOURS", "8"))
 
 
@@ -33,8 +35,6 @@ def verify_password(password: str, encoded: str | None) -> bool:
 
 
 def ensure_demo_user() -> None:
-    if not DEMO_PASSWORD:
-        return
     from .database import SessionLocal, UserRecord
     with SessionLocal() as session:
         user = session.get(UserRecord, DEMO_EMAIL)
@@ -70,8 +70,6 @@ def persist_session(email: str, token: str) -> str:
 
 
 def issue_token(email: str) -> str:
-    if not _SECRET:
-        raise RuntimeError("TRACEGAURD_SECRET is required")
     payload = f"{email.lower()}|{int(time.time()) + SESSION_HOURS * 3600}|{secrets.token_urlsafe(24)}"
     signature = hmac.new(_SECRET, payload.encode(), hashlib.sha256).hexdigest()
     token = base64.urlsafe_b64encode(f"{payload}|{signature}".encode()).decode()
