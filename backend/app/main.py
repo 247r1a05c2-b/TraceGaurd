@@ -29,7 +29,7 @@ _cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "TRACEGAURD_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
+        "http://localhost:5173,http://127.0.0.1:5173,https://tracegaurd-brown.vercel.app",
     ).split(",")
     if origin.strip()
 ]
