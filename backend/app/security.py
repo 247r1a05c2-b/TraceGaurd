@@ -10,7 +10,18 @@ DEMO_EMAIL = os.getenv("DEMO_ENGINEER_EMAIL", "engineer@tracegaurd.ai").strip().
 DEMO_PASSWORD = os.getenv("DEMO_ENGINEER_PASSWORD", "TraceGaurd@123").strip()
 # A development fallback keeps the hackathon demo runnable without an extra setup step.
 # Set TRACEGAURD_SECRET in Vercel/production to a long random secret.
-_SECRET = os.getenv("TRACEGAURD_SECRET", "tracegaurd-hackathon-demo-secret-change-in-production").encode()
+_configured_secret = os.getenv("TRACEGAURD_SECRET")
+_is_production = os.getenv("APP_ENV", "").strip().lower() == "production" or os.getenv("VERCEL") == "1"
+if _is_production and not _configured_secret:
+    raise RuntimeError("TRACEGAURD_SECRET must be configured in production")
+if not _configured_secret:
+    import warnings
+    warnings.warn(
+        "Using the development-only TraceGaurd signing secret. Set TRACEGAURD_SECRET before deployment.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
+_SECRET = (_configured_secret or "tracegaurd-hackathon-demo-secret-change-in-production").encode()
 SESSION_HOURS = int(os.getenv("SESSION_HOURS", "8"))
 
 

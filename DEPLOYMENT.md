@@ -120,3 +120,8 @@ The suite covers authentication, protected APIs, the full eight-agent graph, eva
 8. Approve the allow-listed production-style action.
 9. Show the controlled simulated remediation and verification results.
 10. Show evaluation metrics and audit timeline.
+
+
+## Required production security settings
+
+Set `TRACEGAURD_SECRET` to a long, random secret in the backend deployment environment. Production startup now fails if this secret is missing. Set `TRACEGAURD_CORS_ORIGINS` to a comma-separated list of exact trusted frontend origins, for example `https://your-frontend.example,https://preview.example`. Do not use `*` for credentialed requests. For local development, the API allows `http://localhost:5173` and `http://127.0.0.1:5173` by default.

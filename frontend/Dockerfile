@@ -3,8 +3,11 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install
 COPY index.html ./
+COPY tsconfig.json ./
 COPY src ./src
+COPY public ./public
 COPY *.mjs ./
+COPY *.js *.css ./
 RUN npm run build
 
 FROM nginx:1.27-alpine
