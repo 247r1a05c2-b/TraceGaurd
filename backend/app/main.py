@@ -23,7 +23,23 @@ from .simulator import available_scenarios, generate_scenario
 from .store import store
 
 app = FastAPI(title="TraceGaurd API", version="4.1.0", description="Multi-client incident monitoring, multi-agent RCA, RAG evidence, human guardrails and controlled remediation")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# Credentialed CORS requests must use explicit trusted origins. Configure the
+# deployed frontend origin with TRACEGAURD_CORS_ORIGINS (comma-separated).
+_cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "TRACEGAURD_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+)
 bearer = HTTPBearer(auto_error=False)
 
 with SessionLocal() as _session:
